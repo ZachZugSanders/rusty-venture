@@ -1,0 +1,20 @@
+[package]
+name = "rusty-venture-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rusty-venture"
+path = "src/main.rs"
+
+[dependencies]
+rusty-venture-core.workspace = true
+rusty-venture-llm.workspace = true
+rusty-venture-actions.workspace = true
+rusty-venture-store.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

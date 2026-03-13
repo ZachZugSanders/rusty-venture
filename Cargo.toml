@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rusty-venture-core",
+    "crates/rusty-venture-llm",
+    "crates/rusty-venture-actions",
+    "crates/rusty-venture-store",
+    "crates/rusty-venture-vcs",
+    "crates/rusty-venture-improve",
+    "crates/rusty-venture-cli",
+    "crates/rusty-venture-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["rusty-venture contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-org/rusty-venture"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream"] }
+axum = { version = "0.7", features = ["json", "macros"] }
+tower = { version = "0.4" }
+tower-http = { version = "0.5", features = ["trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Docker
+bollard = "0.17"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Database — SQLite via SQLx (bundled, no system library required)
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "migrate"] }
+
+# Errors
+thiserror = "1"
+anyhow = "1"
+
+# Async traits
+async-trait = "0.1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+tokio-stream = "0.1"
+
+# Encoding
+base64 = "0.22"
+urlencoding = "2"
+
+# File system / archiving
+tempfile = "3"
+tar = "0.4"
+
+# Internal crates
+rusty-venture-core = { path = "crates/rusty-venture-core" }
+rusty-venture-llm = { path = "crates/rusty-venture-llm" }
+rusty-venture-actions = { path = "crates/rusty-venture-actions" }
+rusty-venture-store = { path = "crates/rusty-venture-store" }
+rusty-venture-vcs = { path = "crates/rusty-venture-vcs" }
+rusty-venture-improve = { path = "crates/rusty-venture-improve" }

@@ -1,0 +1,80 @@
+flowchart TD
+    START([User / System]) --> IFACE{Interface}
+
+    IFACE -->|CLI| CLI_CMD{Command}
+    IFACE -->|HTTP Server| HTTP_ROUTES{Route}
+
+    %% ── HTTP Server routes ──────────────────────────────────────────
+    HTTP_ROUTES -->|GET /health| HEALTH[Return status + version]
+    HTTP_ROUTES -->|GET /scans| SCANS_Q{Filter by repo?}
+    SCANS_Q -->|yes| SCANS_REPO[Query DB for repo scans]
+    SCANS_Q -->|no| SCANS_ALL[Query DB for all scans]
+    SCANS_REPO & SCANS_ALL --> SCANS_OUT([Return JSON scan list])
+    HTTP_ROUTES -->|POST /analyze| HTTP_ANALYZE[run_repo_analysis]
+
+    %% ── CLI commands ────────────────────────────────────────────────
+    CLI_CMD -->|history| HIST_Q{Filter by repo?}
+    HIST_Q -->|yes| HIST_REPO[Query DB for repo scans]
+    HIST_Q -->|no| HIST_ALL[Query DB for all scans]
+    HIST_REPO & HIST_ALL --> HIST_PRINT([Print table to terminal])
+
+    CLI_CMD -->|analyze| CLI_ANALYZE[run_repo_analysis]
+
+    %% ── Shared analysis pipeline ────────────────────────────────────
+    CLI_ANALYZE & HTTP_ANALYZE --> SPAWN[SpawnContainerAction ubuntu:22.04]
+    SPAWN -->|fail| ABORT1([Abort — container unavailable])
+    SPAWN -->|ok| CLONE[CloneRepoAction git clone inside container]
+    CLONE -->|fail| ABORT2([Abort — repo unreachable])
+    CLONE -->|ok| DETECT[DetectLanguageAction file-marker scoring]
+    DETECT --> DEPS[AnalyzeDepsAction language-specific parsers]
+    DEPS --> DOCKER_FIND[FindDockerfilesAction recursive find]
+    DOCKER_FIND --> AUDIT[AuditCommittedFilesAction deny-list matching]
+    AUDIT --> MATURITY[MaturityScoreAction 6-dimension scoring]
+    MATURITY --> REPORT[GenerateReportAction LLM synthesis → FinalReport]
+    REPORT --> CLEANUP[CleanupContainerAction Removing container]
+
+    CLEANUP --> PERSIST{DATABASE_URL set?}
+    PERSIST -->|yes| DB[(SQLite DB insert_scan)]
+    PERSIST -->|no| SKIP_DB[skip persistence]
+    DB & SKIP_DB --> OUTPUT{Output format}
+    OUTPUT -->|text| TEXT_OUT([Print human-readable report])
+    OUTPUT -->|json| JSON_OUT([Print JSON])
+    OUTPUT -->|HTTP response| HTTP_OUT([Return JSON response])
+
+    %% ── Improve workflow (planned next phase) ───────────────────────
+    CLI_CMD -->|improve 🔜 planned| IMPROVE_START[run_repo_analysis + GenerateScaffoldSpecAction LLM-generated blueprint]
+    IMPROVE_START --> DAG{DAG Engine parallel execution}
+
+    DAG -->|node| CONTAINERIZE[ContainerizeAction Generate Dockerfile + docker-compose.yml]
+    CONTAINERIZE --> BUILD{docker build succeeds?}
+    BUILD -->|yes| BUILD_OK[Mark build_validated=true]
+    BUILD -->|no — up to 5 iterations| LLM_FIX[LLM diagnoses error patches Dockerfile]
+    LLM_FIX --> BUILD
+
+    DAG -->|node| GOV[GenerateGovernanceFilesAction LICENSE · SECURITY.md CONTRIBUTING.md · CHANGELOG.md dependabot.yml · lint config]
+
+    DAG -->|node| DISC[DiscoverDependentsAction VCS code search + org repo listing]
+    DISC --> GATE[DependencyDecisionGate Present pros/cons table Wait for user input]
+    GATE --> LLM_INFER[LLM infers DependencyDecision]
+    LLM_INFER --> STRATEGY{Strategy?}
+    STRATEGY -->|mono-repo| S_MONO[Merge into monorepo]
+    STRATEGY -->|mock| S_MOCK[Generate mock stubs]
+    STRATEGY -->|independent| S_IND[Keep repos separate]
+    STRATEGY -->|skip| S_SKIP[Skip dependents]
+    STRATEGY -->|mixed| S_MIX[Per-repo decisions]
+
+    BUILD_OK & GOV & S_MONO & S_MOCK & S_IND & S_SKIP & S_MIX --> COMMIT[CreateBranchAction Group independent changes into separate branches]
+    COMMIT --> BRANCHES([rusty-venture/governance/run rusty-venture/containerize/run PR-ready branches on VCS])
+
+    %% ── Styling ─────────────────────────────────────────────────────
+    classDef action fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    classDef decision fill:#5f3a1e,stroke:#d97a4a,color:#fff
+    classDef terminal fill:#1e5f3a,stroke:#4ad97a,color:#fff
+    classDef abort fill:#5f1e1e,stroke:#d94a4a,color:#fff
+    classDef planned fill:#3a3a5f,stroke:#9a9ad9,color:#ccc,stroke-dasharray:5 5
+
+    class SPAWN,CLONE,DETECT,DEPS,DOCKER_FIND,AUDIT,MATURITY,REPORT,CLEANUP,CONTAINERIZE,GOV,DISC,GATE,LLM_INFER,LLM_FIX,COMMIT action
+    class IFACE,CLI_CMD,HTTP_ROUTES,PERSIST,OUTPUT,BUILD,STRATEGY,SCANS_Q,HIST_Q decision
+    class START,TEXT_OUT,JSON_OUT,HTTP_OUT,HEALTH,SCANS_OUT,HIST_PRINT,BRANCHES terminal
+    class ABORT1,ABORT2 abort
+    class IMPROVE_START,DAG,S_MONO,S_MOCK,S_IND,S_SKIP,S_MIX planned

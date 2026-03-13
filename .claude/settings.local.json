@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(source .env)",
+      "Bash(cargo run:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:bestpractices.coreinfrastructure.org)",
+      "WebSearch",
+      "Bash(gh api:*)",
+      "mcp__claude_ai_Mermaid_Chart__validate_and_render_mermaid_diagram",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''valid:'''', d[''''valid'''']\\); print\\(''''type:'''', d[''''diagramType'''']\\); print\\(''''liveEditUrl:'''', d.get\\(''''liveEditUrl'''',''''''''\\)[:100]\\)\")"
+    ]
+  }
+}
