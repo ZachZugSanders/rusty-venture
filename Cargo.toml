@@ -66,6 +66,9 @@ urlencoding = "2"
 tempfile = "3"
 tar = "0.4"
 
+# Environment
+dotenvy = "0.15"
+
 # Internal crates
 rusty-venture-core = { path = "crates/rusty-venture-core" }
 rusty-venture-llm = { path = "crates/rusty-venture-llm" }

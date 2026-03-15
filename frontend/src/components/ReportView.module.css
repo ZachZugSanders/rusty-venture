@@ -1,0 +1,69 @@
+.root { display: flex; flex-direction: column; gap: 24px; margin-top: 24px; }
+
+/* ── Banner ── */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.bannerItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  gap: 4px;
+}
+.bannerDivider { width: 1px; background: var(--border); align-self: stretch; }
+.bannerLabel { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); }
+.bannerValue { font-size: 22px; font-weight: 700; }
+.bannerValue small { font-size: 13px; font-weight: 400; margin-left: 4px; }
+
+/* ── Sections ── */
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+/* ── Summary ── */
+.summary { line-height: 1.7; color: var(--text); }
+
+/* ── Dimensions ── */
+.dimensions { display: flex; flex-direction: column; gap: 8px; }
+.dimRow { display: flex; align-items: center; gap: 16px; }
+.dimLabel { width: 180px; flex-shrink: 0; font-size: 13px; }
+
+.barWrap { display: flex; align-items: center; gap: 2px; }
+.bar { width: 18px; height: 10px; border-radius: 2px; background: var(--border); }
+.barFilled { background: var(--accent); }
+.barScore { margin-left: 8px; font-size: 12px; color: var(--text-muted); width: 32px; }
+
+/* ── Improvement actions ── */
+.actionList { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.actionItem { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; background: var(--bg); border-radius: var(--radius); border-left: 3px solid var(--accent); }
+.actionName { font-weight: 600; font-size: 13px; }
+.actionDetail { color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+
+/* ── Generic list sections ── */
+.list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.list li { padding-left: 16px; position: relative; color: var(--text); line-height: 1.6; }
+.list li::before { content: '•'; position: absolute; left: 0; color: var(--accent); }
+
+/* ── Colour helpers ── */
+.green { color: var(--green); }
+.yellow { color: var(--yellow); }
+.red { color: var(--red); }

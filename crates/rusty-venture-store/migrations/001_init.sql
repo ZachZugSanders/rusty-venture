@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS scans (
     duration_ms     INTEGER NOT NULL,
     risk_score      INTEGER NOT NULL,       -- 0-100 from LLM report
     composite_maturity INTEGER NOT NULL,    -- 0-100 weighted maturity score
-    maturity_grade  TEXT NOT NULL,          -- NASCENT | EMERGING | DEVELOPING | ESTABLISHED | EXEMPLARY
+    maturity_grade  TEXT NOT NULL,          -- BRONZE | SILVER | GOLD | PLATINUM | DIAMOND
     raw_report      TEXT NOT NULL,          -- JSON blob of FinalReport
     raw_maturity    TEXT NOT NULL           -- JSON blob of MaturityScore
 );

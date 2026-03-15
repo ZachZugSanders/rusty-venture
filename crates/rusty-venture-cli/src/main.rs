@@ -71,6 +71,8 @@ enum OutputFormat {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenvy::dotenv().ok(); // load .env if present — no-op if file is missing
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),

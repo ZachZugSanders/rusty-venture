@@ -128,39 +128,40 @@ impl DimensionScore {
     }
 }
 
-/// Overall maturity grade mapped from the composite score.
+/// Overall maturity tier mapped from the composite score.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MaturityGrade {
-    /// 0–20: Ad hoc processes, minimal hygiene.
-    Nascent,
-    /// 21–40: Some practices in place but inconsistent.
-    Emerging,
-    /// 41–60: Most core practices present; meaningful gaps remain.
-    Developing,
-    /// 61–80: Consistently applied practices; minor gaps.
-    Established,
-    /// 81–100: Exemplary hygiene across all dimensions.
-    Exemplary,
+    /// 0–20: Earliest progression tier.
+    Bronze,
+    /// 21–40: Foundational practices starting to solidify.
+    Silver,
+    /// 41–60: Strong baseline practices in place.
+    Gold,
+    /// 61–80: Advanced maturity and consistency.
+    Platinum,
+    /// 81–100: Top-tier engineering maturity.
+    Diamond,
 }
 
 impl MaturityGrade {
     pub fn from_score(score: u8) -> Self {
         match score {
-            0..=20 => Self::Nascent,
-            21..=40 => Self::Emerging,
-            41..=60 => Self::Developing,
-            61..=80 => Self::Established,
-            _ => Self::Exemplary,
+            0..=20 => Self::Bronze,
+            21..=40 => Self::Silver,
+            41..=60 => Self::Gold,
+            61..=80 => Self::Platinum,
+            _ => Self::Diamond,
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Nascent => "NASCENT",
-            Self::Emerging => "EMERGING",
-            Self::Developing => "DEVELOPING",
-            Self::Established => "ESTABLISHED",
-            Self::Exemplary => "EXEMPLARY",
+            Self::Bronze => "BRONZE",
+            Self::Silver => "SILVER",
+            Self::Gold => "GOLD",
+            Self::Platinum => "PLATINUM",
+            Self::Diamond => "DIAMOND",
         }
     }
 }

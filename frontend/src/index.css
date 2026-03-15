@@ -1,0 +1,52 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --accent: #e05d2e;
+  --accent-dim: #7d3515;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --blue: #58a6ff;
+  --radius: 6px;
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius);
+  font: inherit;
+  padding: 6px 16px;
+}
+
+input, textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 12px;
+  width: 100%;
+  outline: none;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+
+code, pre { font-family: var(--mono); }

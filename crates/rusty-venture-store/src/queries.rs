@@ -149,6 +149,107 @@ pub async fn list_scans(pool: &Pool, limit: i64) -> Result<Vec<ScanSummary>> {
         .collect())
 }
 
+/// A single repo's latest-scan summary for the Repos table.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RepoSummary {
+    pub id: String,
+    pub url: String,
+    pub first_seen: String,
+    pub last_scanned: Option<String>,
+    /// Latest scan id (if any)
+    pub latest_scan_id: Option<String>,
+    pub latest_risk_score: Option<u8>,
+    pub latest_composite_maturity: Option<u8>,
+    pub latest_maturity_grade: Option<String>,
+    pub scan_count: i64,
+}
+
+/// Return all tracked repos with their most-recent scan metrics.
+pub async fn list_repos(pool: &Pool) -> Result<Vec<RepoSummary>> {
+    let rows = sqlx::query(
+        r#"SELECT r.id, r.url, r.first_seen, r.last_scanned,
+                  s.id        AS latest_scan_id,
+                  s.risk_score,
+                  s.composite_maturity,
+                  s.maturity_grade,
+                  (SELECT COUNT(*) FROM scans WHERE repo_id = r.id) AS scan_count
+           FROM repos r
+           LEFT JOIN scans s ON s.id = (
+               SELECT id FROM scans WHERE repo_id = r.id ORDER BY scanned_at DESC LIMIT 1
+           )
+           ORDER BY r.last_scanned DESC"#,
+    )
+    .fetch_all(pool)
+    .await
+    .context("list repos")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| RepoSummary {
+            id: r.get::<String, _>("id"),
+            url: r.get::<String, _>("url"),
+            first_seen: r.get::<String, _>("first_seen"),
+            last_scanned: r.get::<Option<String>, _>("last_scanned"),
+            latest_scan_id: r.get::<Option<String>, _>("latest_scan_id"),
+            latest_risk_score: r.get::<Option<i64>, _>("risk_score").map(|v| v as u8),
+            latest_composite_maturity: r.get::<Option<i64>, _>("composite_maturity").map(|v| v as u8),
+            latest_maturity_grade: r.get::<Option<String>, _>("maturity_grade"),
+            scan_count: r.get::<i64, _>("scan_count"),
+        })
+        .collect())
+}
+
+/// Full scan detail including raw JSON fields for a single scan id.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanDetail {
+    pub id: String,
+    pub repo_url: String,
+    pub scanned_at: String,
+    pub duration_ms: i64,
+    pub risk_score: u8,
+    pub composite_maturity: u8,
+    pub maturity_grade: String,
+    /// Parsed `FinalReport` JSON value.
+    pub report: serde_json::Value,
+    /// Parsed `MaturityScore` JSON value.
+    pub maturity: serde_json::Value,
+}
+
+/// Fetch a single scan by id, with full report payload.
+pub async fn get_scan(pool: &Pool, scan_id: &str) -> Result<Option<ScanDetail>> {
+    let row = sqlx::query(
+        r#"SELECT s.id, r.url, s.scanned_at, s.duration_ms,
+                  s.risk_score, s.composite_maturity, s.maturity_grade,
+                  s.raw_report, s.raw_maturity
+           FROM scans s
+           JOIN repos r ON r.id = s.repo_id
+           WHERE s.id = ?1"#,
+    )
+    .bind(scan_id)
+    .fetch_optional(pool)
+    .await
+    .context("get scan")?;
+
+    let Some(r) = row else { return Ok(None) };
+
+    let report: serde_json::Value =
+        serde_json::from_str(&r.get::<String, _>("raw_report")).unwrap_or(serde_json::Value::Null);
+    let maturity: serde_json::Value =
+        serde_json::from_str(&r.get::<String, _>("raw_maturity")).unwrap_or(serde_json::Value::Null);
+
+    Ok(Some(ScanDetail {
+        id: r.get::<String, _>("id"),
+        repo_url: r.get::<String, _>("url"),
+        scanned_at: r.get::<String, _>("scanned_at"),
+        duration_ms: r.get::<i64, _>("duration_ms"),
+        risk_score: r.get::<i64, _>("risk_score") as u8,
+        composite_maturity: r.get::<i64, _>("composite_maturity") as u8,
+        maturity_grade: r.get::<String, _>("maturity_grade"),
+        report,
+        maturity,
+    }))
+}
+
 /// Return the N most recent scans for one specific repo URL.
 pub async fn list_scans_for_repo(pool: &Pool, repo_url: &str, limit: i64) -> Result<Vec<ScanSummary>> {
     let rows = sqlx::query(

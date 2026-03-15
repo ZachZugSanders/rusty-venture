@@ -1,12 +1,12 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 use rusty_venture_actions::repo::{run_repo_analysis, AuditReport, RepoAnalysisRequest};
-use rusty_venture_store::{insert_scan, list_scans, list_scans_for_repo, open_pool, Pool};
+use rusty_venture_store::{get_scan, insert_scan, list_repos, list_scans, list_scans_for_repo, open_pool, Pool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -59,6 +59,8 @@ impl ApiError {
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok(); // load .env if present — no-op if file is missing
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -83,7 +85,9 @@ async fn main() {
 
     let app = Router::new()
         .route("/analyze", post(analyze_handler))
+        .route("/repos", get(repos_handler))
         .route("/scans", get(scans_handler))
+        .route("/scans/:id", get(scan_detail_handler))
         .route("/health", get(health_handler))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -136,6 +140,42 @@ async fn analyze_handler(
         }
         Err(e) => {
             warn!(repo_url = %body.repo_url, error = %e, "Analysis failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
+        }
+    }
+}
+
+async fn repos_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match list_repos(&state.db).await {
+        Ok(repos) => (
+            StatusCode::OK,
+            Json(ApiResponse { success: true, data: repos }),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!(error = %e, "Failed to list repos");
+            (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
+        }
+    }
+}
+
+async fn scan_detail_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match get_scan(&state.db, &id).await {
+        Ok(Some(detail)) => (
+            StatusCode::OK,
+            Json(ApiResponse { success: true, data: detail }),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            ApiError::new(format!("Scan {id} not found")),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!(scan_id = %id, error = %e, "Failed to fetch scan detail");
             (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
         }
     }
