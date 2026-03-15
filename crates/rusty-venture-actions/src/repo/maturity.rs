@@ -128,39 +128,227 @@ impl DimensionScore {
     }
 }
 
-/// Overall maturity grade mapped from the composite score.
+/// Overall maturity grade expressed as a league tier.
+///
+/// Scores map to tiers as follows:
+///   0–20  → Bronze   21–40 → Silver   41–60 → Gold
+///   61–80 → Platinum 81–100 → Diamond
+///
+/// The `#[serde(rename_all = "SCREAMING_SNAKE_CASE")]` attribute ensures that
+/// the JSON emitted by the `/analyze` API uses the same all-caps vocabulary
+/// as the `maturity_grade` column stored in the database (e.g. `"DIAMOND"`),
+/// eliminating the previous display mismatch between the live-result banner
+/// and the history/repos tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MaturityGrade {
     /// 0–20: Ad hoc processes, minimal hygiene.
-    Nascent,
+    Bronze,
     /// 21–40: Some practices in place but inconsistent.
-    Emerging,
+    Silver,
     /// 41–60: Most core practices present; meaningful gaps remain.
-    Developing,
+    Gold,
     /// 61–80: Consistently applied practices; minor gaps.
-    Established,
+    Platinum,
     /// 81–100: Exemplary hygiene across all dimensions.
-    Exemplary,
+    Diamond,
 }
 
 impl MaturityGrade {
     pub fn from_score(score: u8) -> Self {
         match score {
-            0..=20 => Self::Nascent,
-            21..=40 => Self::Emerging,
-            41..=60 => Self::Developing,
-            61..=80 => Self::Established,
-            _ => Self::Exemplary,
+            0..=20  => Self::Bronze,
+            21..=40 => Self::Silver,
+            41..=60 => Self::Gold,
+            61..=80 => Self::Platinum,
+            _       => Self::Diamond,
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Nascent => "NASCENT",
-            Self::Emerging => "EMERGING",
-            Self::Developing => "DEVELOPING",
-            Self::Established => "ESTABLISHED",
-            Self::Exemplary => "EXEMPLARY",
+            Self::Bronze   => "BRONZE",
+            Self::Silver   => "SILVER",
+            Self::Gold     => "GOLD",
+            Self::Platinum => "PLATINUM",
+            Self::Diamond  => "DIAMOND",
+        }
+    }
+
+    /// Map a historical or current label string to a `MaturityGrade`.
+    ///
+    /// Accepts both the current BRONZE…DIAMOND league-tier vocabulary and the
+    /// legacy NASCENT…EXEMPLARY strings present in older database rows, so that
+    /// existing scan history remains fully readable after the rename migration.
+    /// Returns `None` for any unrecognised string (case-insensitive).
+    pub fn from_legacy_label(label: &str) -> Option<Self> {
+        match label.to_ascii_uppercase().as_str() {
+            // Current league tiers
+            "BRONZE"      => Some(Self::Bronze),
+            "SILVER"      => Some(Self::Silver),
+            "GOLD"        => Some(Self::Gold),
+            "PLATINUM"    => Some(Self::Platinum),
+            "DIAMOND"     => Some(Self::Diamond),
+            // Legacy maturity-stage labels — each maps to its equivalent tier
+            "NASCENT"     => Some(Self::Bronze),
+            "EMERGING"    => Some(Self::Silver),
+            "DEVELOPING"  => Some(Self::Gold),
+            "ESTABLISHED" => Some(Self::Platinum),
+            "EXEMPLARY"   => Some(Self::Diamond),
+            _             => None,
+        }
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- Tier boundary mapping ------------------------------------------------
+
+    /// Every boundary score listed in the issue must land in the correct tier.
+    #[test]
+    fn tier_boundaries_at_floor_and_ceiling_of_each_band() {
+        assert_eq!(MaturityGrade::from_score(0),   MaturityGrade::Bronze);
+        assert_eq!(MaturityGrade::from_score(20),  MaturityGrade::Bronze);
+        assert_eq!(MaturityGrade::from_score(21),  MaturityGrade::Silver);
+        assert_eq!(MaturityGrade::from_score(40),  MaturityGrade::Silver);
+        assert_eq!(MaturityGrade::from_score(41),  MaturityGrade::Gold);
+        assert_eq!(MaturityGrade::from_score(60),  MaturityGrade::Gold);
+        assert_eq!(MaturityGrade::from_score(61),  MaturityGrade::Platinum);
+        assert_eq!(MaturityGrade::from_score(80),  MaturityGrade::Platinum);
+        assert_eq!(MaturityGrade::from_score(81),  MaturityGrade::Diamond);
+        assert_eq!(MaturityGrade::from_score(100), MaturityGrade::Diamond);
+    }
+
+    // -- Label strings are league tiers --------------------------------------
+
+    #[test]
+    fn labels_are_league_tier_vocabulary() {
+        const LEAGUE_TIERS: &[&str] = &["BRONZE", "SILVER", "GOLD", "PLATINUM", "DIAMOND"];
+        for grade in [
+            MaturityGrade::Bronze,
+            MaturityGrade::Silver,
+            MaturityGrade::Gold,
+            MaturityGrade::Platinum,
+            MaturityGrade::Diamond,
+        ] {
+            assert!(
+                LEAGUE_TIERS.contains(&grade.label()),
+                "{:?} emits non-league-tier label: {:?}",
+                grade,
+                grade.label()
+            );
+        }
+    }
+
+    #[test]
+    fn no_legacy_or_abcdf_labels_in_active_grade_logic() {
+        const FORBIDDEN: &[&str] = &[
+            "NASCENT", "EMERGING", "DEVELOPING", "ESTABLISHED", "EXEMPLARY",
+            "A", "B", "C", "D", "F",
+        ];
+        for grade in [
+            MaturityGrade::Bronze,
+            MaturityGrade::Silver,
+            MaturityGrade::Gold,
+            MaturityGrade::Platinum,
+            MaturityGrade::Diamond,
+        ] {
+            assert!(
+                !FORBIDDEN.contains(&grade.label()),
+                "{:?} uses forbidden label: {:?}",
+                grade,
+                grade.label()
+            );
+        }
+    }
+
+    // -- Legacy label compatibility -------------------------------------------
+
+    #[test]
+    fn from_legacy_label_maps_all_historical_values() {
+        assert_eq!(MaturityGrade::from_legacy_label("NASCENT"),     Some(MaturityGrade::Bronze));
+        assert_eq!(MaturityGrade::from_legacy_label("EMERGING"),    Some(MaturityGrade::Silver));
+        assert_eq!(MaturityGrade::from_legacy_label("DEVELOPING"),  Some(MaturityGrade::Gold));
+        assert_eq!(MaturityGrade::from_legacy_label("ESTABLISHED"), Some(MaturityGrade::Platinum));
+        assert_eq!(MaturityGrade::from_legacy_label("EXEMPLARY"),   Some(MaturityGrade::Diamond));
+    }
+
+    #[test]
+    fn from_legacy_label_passes_through_current_tier_names() {
+        assert_eq!(MaturityGrade::from_legacy_label("BRONZE"),   Some(MaturityGrade::Bronze));
+        assert_eq!(MaturityGrade::from_legacy_label("SILVER"),   Some(MaturityGrade::Silver));
+        assert_eq!(MaturityGrade::from_legacy_label("GOLD"),     Some(MaturityGrade::Gold));
+        assert_eq!(MaturityGrade::from_legacy_label("PLATINUM"), Some(MaturityGrade::Platinum));
+        assert_eq!(MaturityGrade::from_legacy_label("DIAMOND"),  Some(MaturityGrade::Diamond));
+    }
+
+    #[test]
+    fn from_legacy_label_is_case_insensitive() {
+        assert_eq!(MaturityGrade::from_legacy_label("bronze"),  Some(MaturityGrade::Bronze));
+        assert_eq!(MaturityGrade::from_legacy_label("nascent"), Some(MaturityGrade::Bronze));
+        assert_eq!(MaturityGrade::from_legacy_label("Diamond"), Some(MaturityGrade::Diamond));
+    }
+
+    #[test]
+    fn from_legacy_label_returns_none_for_unknown() {
+        assert_eq!(MaturityGrade::from_legacy_label("UNKNOWN"), None);
+        assert_eq!(MaturityGrade::from_legacy_label(""),        None);
+        assert_eq!(MaturityGrade::from_legacy_label("A"),       None);
+        assert_eq!(MaturityGrade::from_legacy_label("D"),       None);
+    }
+
+    // -- API contract: serialised grade is a league tier ----------------------
+    //
+    // These tests validate the invariant that the JSON emitted by POST /analyze
+    // uses the league-tier vocabulary — no legacy strings, no A/B/C/D/F grades.
+
+    #[test]
+    fn maturity_grade_serialises_to_screaming_snake_league_tier() {
+        let cases = [
+            (MaturityGrade::Bronze,   "\"BRONZE\""),
+            (MaturityGrade::Silver,   "\"SILVER\""),
+            (MaturityGrade::Gold,     "\"GOLD\""),
+            (MaturityGrade::Platinum, "\"PLATINUM\""),
+            (MaturityGrade::Diamond,  "\"DIAMOND\""),
+        ];
+        for (grade, expected_json) in cases {
+            let json = serde_json::to_string(&grade).expect("serialize MaturityGrade");
+            assert_eq!(json, expected_json, "{:?} did not serialise to {:?}", grade, expected_json);
+        }
+    }
+
+    #[test]
+    fn maturity_grade_deserialises_only_league_tier_strings() {
+        // Current tier strings must round-trip.
+        let valid = [
+            ("\"BRONZE\"",   MaturityGrade::Bronze),
+            ("\"SILVER\"",   MaturityGrade::Silver),
+            ("\"GOLD\"",     MaturityGrade::Gold),
+            ("\"PLATINUM\"", MaturityGrade::Platinum),
+            ("\"DIAMOND\"",  MaturityGrade::Diamond),
+        ];
+        for (json, expected) in valid {
+            let grade: MaturityGrade =
+                serde_json::from_str(json).unwrap_or_else(|e| panic!("deserialize {json:?}: {e}"));
+            assert_eq!(grade, expected);
+        }
+
+        // Legacy and A/B/C/D/F strings must NOT deserialise.
+        let forbidden = [
+            "\"NASCENT\"", "\"EMERGING\"", "\"DEVELOPING\"",
+            "\"ESTABLISHED\"", "\"EXEMPLARY\"",
+            "\"A\"", "\"B\"", "\"C\"", "\"D\"", "\"F\"",
+        ];
+        for s in forbidden {
+            let result: Result<MaturityGrade, _> = serde_json::from_str(s);
+            assert!(
+                result.is_err(),
+                "Forbidden value {s} should not deserialise as MaturityGrade"
+            );
         }
     }
 }
