@@ -95,6 +95,85 @@ pub async fn insert_scan(
         .context("insert violation")?;
     }
 
+    // ── v2 grade persistence ─────────────────────────────────────────────────
+    // Uses a well-known fixed ID for the "v2.0.0" grade model so the seed is
+    // effectively a no-op on repeated runs (INSERT OR IGNORE).
+    const V2_MODEL_ID: &str = "model-v2.0.0";
+    sqlx::query(
+        "INSERT OR IGNORE INTO grade_models (id, version, description, created_at) \
+         VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(V2_MODEL_ID)
+    .bind("2.0.0")
+    .bind("Default v2 maturity grade model")
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .context("upsert grade_model in insert_scan")?;
+
+    let grade_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO scan_grades \
+         (id, scan_id, model_id, composite, grade, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(&grade_id)
+    .bind(scan_id)
+    .bind(V2_MODEL_ID)
+    .bind(composite)
+    .bind(&grade)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .context("insert scan_grade in insert_scan")?;
+
+    for dim in &maturity.dimensions {
+        let dim_result = sqlx::query(
+            "INSERT INTO scan_dimension_scores_v2 \
+             (scan_grade_id, dimension, score, weight) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(&grade_id)
+        .bind(dim.dimension.label())
+        .bind(dim.score as i64)
+        .bind(dim.dimension.weight() as f64)
+        .execute(&mut *tx)
+        .await
+        .context("insert dimension_score_v2 in insert_scan")?;
+
+        let dim_id = dim_result.last_insert_rowid();
+
+        for signal in &dim.signals {
+            sqlx::query(
+                "INSERT INTO scan_signals \
+                 (dimension_score_id, name, description, passed, points, detail) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(dim_id)
+            .bind(&signal.name)
+            .bind(&signal.description)
+            .bind(signal.passed as i64)
+            .bind(signal.points as i64)
+            .bind(&signal.detail)
+            .execute(&mut *tx)
+            .await
+            .context("insert scan_signal in insert_scan")?;
+        }
+    }
+
+    // Store the full MaturityScore JSON as the decision-graph artifact.
+    let graph_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at) \
+         VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(&graph_id)
+    .bind(scan_id)
+    .bind(&raw_maturity)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .context("insert decision_graph in insert_scan")?;
+
     tx.commit().await.context("commit transaction")?;
 
     tracing::info!(
@@ -148,6 +227,294 @@ pub async fn list_scans(pool: &Pool, limit: i64) -> Result<Vec<ScanSummary>> {
         })
         .collect())
 }
+
+// ── v2 query API ─────────────────────────────────────────────────────────────
+
+/// Insert or ignore a grade model row (idempotent by primary key).
+pub async fn upsert_grade_model(
+    pool: &Pool,
+    id: &str,
+    version: &str,
+    description: &str,
+    created_at: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO grade_models (id, version, description, created_at) \
+         VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(id)
+    .bind(version)
+    .bind(description)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .context("upsert grade_model")?;
+    Ok(())
+}
+
+/// Insert a v2 scan grade record.
+pub async fn insert_scan_grade(
+    pool: &Pool,
+    id: &str,
+    scan_id: &str,
+    model_id: &str,
+    composite: i64,
+    grade: &str,
+    created_at: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO scan_grades \
+         (id, scan_id, model_id, composite, grade, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(id)
+    .bind(scan_id)
+    .bind(model_id)
+    .bind(composite)
+    .bind(grade)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .context("insert scan_grade")?;
+    Ok(())
+}
+
+/// Retrieve the v2 grade for a scan (returns `None` if not yet recorded).
+pub async fn get_scan_grade_v2(
+    pool: &Pool,
+    scan_id: &str,
+) -> Result<Option<crate::models::ScanGradeRow>> {
+    let row = sqlx::query_as::<_, crate::models::ScanGradeRow>(
+        "SELECT id, scan_id, model_id, composite, grade, created_at \
+         FROM scan_grades WHERE scan_id = ?",
+    )
+    .bind(scan_id)
+    .fetch_optional(pool)
+    .await
+    .context("get_scan_grade_v2")?;
+    Ok(row)
+}
+
+/// Insert a v2 dimension score row and return its auto-increment id.
+pub async fn insert_dimension_score_v2(
+    pool: &Pool,
+    scan_grade_id: &str,
+    dimension: &str,
+    score: i64,
+    weight: f64,
+) -> Result<i64> {
+    let result = sqlx::query(
+        "INSERT INTO scan_dimension_scores_v2 \
+         (scan_grade_id, dimension, score, weight) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(scan_grade_id)
+    .bind(dimension)
+    .bind(score)
+    .bind(weight)
+    .execute(pool)
+    .await
+    .context("insert dimension_score_v2")?;
+    Ok(result.last_insert_rowid())
+}
+
+/// Insert a signal row and return its auto-increment id.
+pub async fn insert_scan_signal(
+    pool: &Pool,
+    dimension_score_id: i64,
+    name: &str,
+    description: &str,
+    passed: bool,
+    points: i64,
+    detail: Option<&str>,
+) -> Result<i64> {
+    let result = sqlx::query(
+        "INSERT INTO scan_signals \
+         (dimension_score_id, name, description, passed, points, detail) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(dimension_score_id)
+    .bind(name)
+    .bind(description)
+    .bind(passed as i64)
+    .bind(points)
+    .bind(detail)
+    .execute(pool)
+    .await
+    .context("insert scan_signal")?;
+    Ok(result.last_insert_rowid())
+}
+
+/// Attach an evidence record to a signal.
+pub async fn insert_signal_evidence(
+    pool: &Pool,
+    signal_id: i64,
+    kind: &str,
+    value: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO signal_evidence (signal_id, kind, value) VALUES (?1, ?2, ?3)",
+    )
+    .bind(signal_id)
+    .bind(kind)
+    .bind(value)
+    .execute(pool)
+    .await
+    .context("insert signal_evidence")?;
+    Ok(())
+}
+
+/// Store the decision-graph artifact for a scan.
+pub async fn insert_decision_graph(
+    pool: &Pool,
+    id: &str,
+    scan_id: &str,
+    graph_json: &str,
+    created_at: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at) \
+         VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(id)
+    .bind(scan_id)
+    .bind(graph_json)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .context("insert decision_graph")?;
+    Ok(())
+}
+
+/// Retrieve the decision graph for a scan (returns `None` if absent).
+pub async fn get_decision_graph_for_scan(
+    pool: &Pool,
+    scan_id: &str,
+) -> Result<Option<crate::models::DecisionGraphRow>> {
+    let row = sqlx::query_as::<_, crate::models::DecisionGraphRow>(
+        "SELECT id, scan_id, graph_json, created_at \
+         FROM decision_graphs WHERE scan_id = ?",
+    )
+    .bind(scan_id)
+    .fetch_optional(pool)
+    .await
+    .context("get_decision_graph_for_scan")?;
+    Ok(row)
+}
+
+// ── Backfill ─────────────────────────────────────────────────────────────────
+
+/// Backfill v2 grade rows for every scan that pre-dates the v2 schema.
+///
+/// For each `scans` row that has no corresponding `scan_grades` row, this
+/// function deserialises the stored `raw_maturity` JSON blob and inserts the
+/// full v2 chain: `grade_models` seed → `scan_grades` → per-dimension
+/// `scan_dimension_scores_v2` → per-signal `scan_signals`.
+///
+/// The function is **idempotent**: it only processes scans that have no v2
+/// grade yet, so running it multiple times is safe.
+///
+/// Returns the number of scans that were backfilled.
+pub async fn backfill_v2_grades(pool: &Pool) -> Result<usize> {
+    use rusty_venture_actions::repo::maturity::MaturityScore;
+
+    // Find all scan IDs that have no scan_grades row yet.
+    let pending: Vec<(String, String)> = sqlx::query_as(
+        "SELECT s.id, s.raw_maturity FROM scans s \
+         WHERE NOT EXISTS (SELECT 1 FROM scan_grades g WHERE g.scan_id = s.id)",
+    )
+    .fetch_all(pool)
+    .await
+    .context("backfill: fetch pending scans")?;
+
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    // Ensure the v2 model seed row exists.
+    const V2_MODEL_ID: &str = "model-v2.0.0";
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT OR IGNORE INTO grade_models (id, version, description, created_at) \
+         VALUES (?1, '2.0.0', 'Default v2 maturity grade model', ?2)",
+    )
+    .bind(V2_MODEL_ID)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .context("backfill: upsert grade_model")?;
+
+    let mut count = 0usize;
+
+    for (scan_id, raw_maturity) in &pending {
+        let maturity: MaturityScore = match serde_json::from_str(raw_maturity) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(scan_id = %scan_id, err = %e, "backfill: skip — cannot parse raw_maturity");
+                continue;
+            }
+        };
+
+        let mut tx = pool.begin().await.context("backfill: begin tx")?;
+
+        let grade_id = Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO scan_grades \
+             (id, scan_id, model_id, composite, grade, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(&grade_id)
+        .bind(scan_id)
+        .bind(V2_MODEL_ID)
+        .bind(maturity.composite as i64)
+        .bind(maturity.grade.label())
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .context("backfill: insert scan_grade")?;
+
+        for dim in &maturity.dimensions {
+            let res = sqlx::query(
+                "INSERT INTO scan_dimension_scores_v2 \
+                 (scan_grade_id, dimension, score, weight) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(&grade_id)
+            .bind(dim.dimension.label())
+            .bind(dim.score as i64)
+            .bind(dim.dimension.weight() as f64)
+            .execute(&mut *tx)
+            .await
+            .context("backfill: insert dimension_score_v2")?;
+
+            let dim_id = res.last_insert_rowid();
+
+            for signal in &dim.signals {
+                sqlx::query(
+                    "INSERT INTO scan_signals \
+                     (dimension_score_id, name, description, passed, points, detail) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                )
+                .bind(dim_id)
+                .bind(&signal.name)
+                .bind(&signal.description)
+                .bind(signal.passed as i64)
+                .bind(signal.points as i64)
+                .bind(&signal.detail)
+                .execute(&mut *tx)
+                .await
+                .context("backfill: insert scan_signal")?;
+            }
+        }
+
+        tx.commit().await.context("backfill: commit")?;
+        count += 1;
+    }
+
+    tracing::info!(backfilled = count, "v2 grade backfill complete");
+    Ok(count)
+}
+
+
+// ── v1 list helpers ───────────────────────────────────────────────────────────
 
 /// Return the N most recent scans for one specific repo URL.
 pub async fn list_scans_for_repo(pool: &Pool, repo_url: &str, limit: i64) -> Result<Vec<ScanSummary>> {

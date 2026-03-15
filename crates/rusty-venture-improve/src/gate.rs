@@ -59,7 +59,7 @@ pub struct PerRepoDependencyDecision {
 ///
 /// # Wiring
 /// Create a `oneshot::channel()` before building the workflow:
-/// ```rust
+/// ```rust,ignore
 /// let (decision_tx, decision_rx) = oneshot::channel::<String>();
 /// // … spawn a task to write user input to decision_tx …
 /// let gate = DependencyDecisionGate::new(connector, decision_rx);

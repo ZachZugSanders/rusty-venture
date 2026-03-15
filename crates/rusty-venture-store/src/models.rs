@@ -43,3 +43,95 @@ pub struct ViolationRow {
     pub file_path: String,
     pub recommendation: String,
 }
+
+// ── v2 grade model ────────────────────────────────────────────────────────────
+
+/// A version of the scoring model (grade_models table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct GradeModelRow {
+    /// UUID primary key.
+    pub id: String,
+    /// Semantic version string, e.g. `"2.0.0"`.
+    pub version: String,
+    /// Human-readable description of this model version.
+    pub description: String,
+    /// ISO 8601 timestamp of when this model was registered.
+    pub created_at: String,
+}
+
+/// The computed v2 grade for one scan (scan_grades table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct ScanGradeRow {
+    /// UUID primary key.
+    pub id: String,
+    /// FK → scans.id
+    pub scan_id: String,
+    /// FK → grade_models.id
+    pub model_id: String,
+    /// Weighted composite score, 0–100.
+    pub composite: i64,
+    /// League-tier label: BRONZE / SILVER / GOLD / PLATINUM / DIAMOND.
+    pub grade: String,
+    /// ISO 8601 timestamp.
+    pub created_at: String,
+}
+
+/// Per-dimension score within a v2 scan grade (scan_dimension_scores_v2 table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct DimensionScoreV2Row {
+    /// Auto-increment primary key.
+    pub id: i64,
+    /// FK → scan_grades.id
+    pub scan_grade_id: String,
+    /// Dimension label, e.g. `"Security"`.
+    pub dimension: String,
+    /// Normalised score 0–100.
+    pub score: i64,
+    /// Dimension weight used in the composite calculation.
+    pub weight: f64,
+}
+
+/// One evaluated signal within a dimension score (scan_signals table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct ScanSignalRow {
+    /// Auto-increment primary key.
+    pub id: i64,
+    /// FK → scan_dimension_scores_v2.id
+    pub dimension_score_id: i64,
+    /// Short identifier, e.g. `"no_critical_violations"`.
+    pub name: String,
+    /// Human-readable description of what was measured.
+    pub description: String,
+    /// Whether the signal passed for this scan.
+    pub passed: bool,
+    /// Maximum point value for this signal.
+    pub points: i64,
+    /// Optional recommendation when the signal fails.
+    pub detail: Option<String>,
+}
+
+/// One piece of evidence attached to a signal (signal_evidence table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct SignalEvidenceRow {
+    /// Auto-increment primary key.
+    pub id: i64,
+    /// FK → scan_signals.id
+    pub signal_id: i64,
+    /// Evidence kind, e.g. `"file_found"`, `"count"`.
+    pub kind: String,
+    /// The evidence value (may be a JSON blob).
+    pub value: String,
+}
+
+/// Serialised evaluation DAG for one scan (decision_graphs table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct DecisionGraphRow {
+    /// UUID primary key.
+    pub id: String,
+    /// FK → scans.id
+    pub scan_id: String,
+    /// Full graph serialised as JSON.
+    pub graph_json: String,
+    /// ISO 8601 timestamp.
+    pub created_at: String,
+}
