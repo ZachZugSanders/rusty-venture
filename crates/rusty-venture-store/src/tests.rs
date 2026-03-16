@@ -829,6 +829,428 @@ mod backfill {
     }
 }
 
+// ── Overview / trends query tests ────────────────────────────────────────────
+//
+// These tests exercise the read-path queries that power the v2 repo-overview
+// and trend API endpoints.
+
+#[cfg(test)]
+mod overview {
+    use chrono::Utc;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use uuid::Uuid;
+
+    use crate::queries::{
+        get_repo_overview, get_repo_trends, list_repos,
+        insert_dimension_score_v2, insert_scan_signal,
+    };
+
+    async fn make_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("open in-memory DB");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
+    async fn seed_repo(pool: &sqlx::SqlitePool) -> String {
+        let repo_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("INSERT INTO repos (id, url, first_seen) VALUES (?1, ?2, ?3)")
+            .bind(&repo_id)
+            .bind(format!("https://github.com/test/{repo_id}"))
+            .bind(&now)
+            .execute(pool)
+            .await
+            .unwrap();
+        repo_id
+    }
+
+    /// Insert a scan + full v2 grade chain, return (scan_id, grade_id).
+    async fn seed_full_scan(
+        pool: &sqlx::SqlitePool,
+        repo_id: &str,
+        composite: i64,
+        grade: &str,
+        scanned_at: &str,
+    ) -> (String, String) {
+        let scan_id = Uuid::new_v4().to_string();
+        let model_id = "model-v2.0.0";
+        let grade_id = Uuid::new_v4().to_string();
+
+        // ensure model exists
+        sqlx::query(
+            "INSERT OR IGNORE INTO grade_models (id, version, description, created_at) \
+             VALUES (?1, '2.0.0', 'test', ?2)",
+        )
+        .bind(model_id)
+        .bind(scanned_at)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"INSERT INTO scans (id, repo_id, scanned_at, duration_ms, risk_score,
+               composite_maturity, maturity_grade, raw_report, raw_maturity)
+               VALUES (?1, ?2, ?3, 100, 5, ?4, ?5, '{}', '{}')"#,
+        )
+        .bind(&scan_id)
+        .bind(repo_id)
+        .bind(scanned_at)
+        .bind(composite)
+        .bind(grade)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO scan_grades (id, scan_id, model_id, composite, grade, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(&grade_id)
+        .bind(&scan_id)
+        .bind(model_id)
+        .bind(composite)
+        .bind(grade)
+        .bind(scanned_at)
+        .execute(pool)
+        .await
+        .unwrap();
+
+        (scan_id, grade_id)
+    }
+
+    // ── list_repos ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_repos_returns_all_repos() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let repos = list_repos(&pool, 10).await.expect("list_repos");
+        assert!(repos.iter().any(|r| r.id == repo_id), "seeded repo must appear in list");
+    }
+
+    #[tokio::test]
+    async fn list_repos_includes_scan_count_and_latest_grade() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = Utc::now().to_rfc3339();
+        seed_full_scan(&pool, &repo_id, 75, "GOLD", &now).await;
+
+        let repos = list_repos(&pool, 10).await.unwrap();
+        let repo = repos.iter().find(|r| r.id == repo_id).unwrap();
+
+        assert_eq!(repo.scan_count, 1);
+        assert_eq!(repo.latest_maturity_grade.as_deref(), Some("GOLD"));
+        assert_eq!(repo.latest_composite_maturity, Some(75));
+    }
+
+    #[tokio::test]
+    async fn list_repos_scan_count_increments() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now1 = "2026-03-01T10:00:00Z";
+        let now2 = "2026-03-15T10:00:00Z";
+        seed_full_scan(&pool, &repo_id, 50, "GOLD", now1).await;
+        seed_full_scan(&pool, &repo_id, 80, "PLATINUM", now2).await;
+
+        let repos = list_repos(&pool, 10).await.unwrap();
+        let repo = repos.iter().find(|r| r.id == repo_id).unwrap();
+
+        assert_eq!(repo.scan_count, 2);
+        // latest grade should come from the most recent scan
+        assert_eq!(repo.latest_maturity_grade.as_deref(), Some("PLATINUM"));
+    }
+
+    #[tokio::test]
+    async fn list_repos_empty_repo_has_no_latest_grade() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+
+        let repos = list_repos(&pool, 10).await.unwrap();
+        let repo = repos.iter().find(|r| r.id == repo_id).unwrap();
+        assert_eq!(repo.scan_count, 0);
+        assert!(repo.latest_maturity_grade.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_repos_respects_limit() {
+        let pool = make_pool().await;
+        for _ in 0..5 {
+            seed_repo(&pool).await;
+        }
+        let repos = list_repos(&pool, 3).await.unwrap();
+        assert_eq!(repos.len(), 3, "limit must be respected");
+    }
+
+    // ── get_repo_overview ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_repo_overview_returns_none_for_unknown_repo() {
+        let pool = make_pool().await;
+        let result = get_repo_overview(&pool, "no-such-repo")
+            .await
+            .expect("should not error");
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_repo_overview_returns_none_when_no_v2_grade() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        // Insert a scan but no v2 grade
+        let scan_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO scans (id, repo_id, scanned_at, duration_ms, risk_score, \
+             composite_maturity, maturity_grade, raw_report, raw_maturity) \
+             VALUES (?1, ?2, ?3, 100, 0, 50, 'GOLD', '{}', '{}')",
+        )
+        .bind(&scan_id)
+        .bind(&repo_id)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = get_repo_overview(&pool, &repo_id).await.unwrap();
+        assert!(result.is_none(), "no v2 grade → None overview");
+    }
+
+    #[tokio::test]
+    async fn get_repo_overview_composite_and_grade_are_correct() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = Utc::now().to_rfc3339();
+        let (_, grade_id) = seed_full_scan(&pool, &repo_id, 82, "PLATINUM", &now).await;
+
+        // Add one dimension + two signals (one passed, one failed)
+        let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
+            .await
+            .unwrap();
+        insert_scan_signal(&pool, dim_id, "sig_pass", "passed signal", true, 40, None)
+            .await
+            .unwrap();
+        insert_scan_signal(&pool, dim_id, "sig_fail", "failed signal", false, 30, Some("fix it"))
+            .await
+            .unwrap();
+
+        let overview = get_repo_overview(&pool, &repo_id)
+            .await
+            .unwrap()
+            .expect("overview must exist");
+
+        assert_eq!(overview.composite, 82);
+        assert_eq!(overview.grade, "PLATINUM");
+        assert_eq!(overview.repo_id, repo_id);
+    }
+
+    #[tokio::test]
+    async fn get_repo_overview_confidence_is_correct() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = Utc::now().to_rfc3339();
+        let (_, grade_id) = seed_full_scan(&pool, &repo_id, 60, "GOLD", &now).await;
+
+        let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 60, 0.25)
+            .await
+            .unwrap();
+        // 2 passed, 2 failed → 50% confidence
+        for i in 0..2 {
+            insert_scan_signal(&pool, dim_id, &format!("pass_{i}"), "p", true, 20, None)
+                .await
+                .unwrap();
+        }
+        for i in 0..2 {
+            insert_scan_signal(&pool, dim_id, &format!("fail_{i}"), "f", false, 20, Some("fix"))
+                .await
+                .unwrap();
+        }
+
+        let overview = get_repo_overview(&pool, &repo_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            (overview.confidence - 50.0).abs() < 1.0,
+            "confidence should be ~50%, got {}",
+            overview.confidence
+        );
+    }
+
+    #[tokio::test]
+    async fn get_repo_overview_top_blockers_are_failed_signals_by_points_desc() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = Utc::now().to_rfc3339();
+        let (_, grade_id) = seed_full_scan(&pool, &repo_id, 40, "SILVER", &now).await;
+        let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 40, 0.25)
+            .await
+            .unwrap();
+
+        // A high-value blocker and a low-value blocker
+        insert_scan_signal(&pool, dim_id, "big_blocker", "Big", false, 40, Some("add SECURITY.md"))
+            .await
+            .unwrap();
+        insert_scan_signal(&pool, dim_id, "small_blocker", "Small", false, 10, Some("minor fix"))
+            .await
+            .unwrap();
+        // A passing signal — should NOT appear in blockers
+        insert_scan_signal(&pool, dim_id, "passer", "Pass", true, 30, None)
+            .await
+            .unwrap();
+
+        let overview = get_repo_overview(&pool, &repo_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(overview.top_blockers.len(), 2, "two failed signals");
+        assert_eq!(
+            overview.top_blockers[0].signal_name,
+            "big_blocker",
+            "highest-points blocker must be first"
+        );
+        assert!(!overview.top_blockers.iter().any(|b| b.signal_name == "passer"));
+    }
+
+    #[tokio::test]
+    async fn get_repo_overview_dimensions_have_pass_counts() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = Utc::now().to_rfc3339();
+        let (_, grade_id) = seed_full_scan(&pool, &repo_id, 70, "GOLD", &now).await;
+        let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 70, 0.25)
+            .await
+            .unwrap();
+        insert_scan_signal(&pool, dim_id, "s1", "d", true, 40, None).await.unwrap();
+        insert_scan_signal(&pool, dim_id, "s2", "d", true, 30, None).await.unwrap();
+        insert_scan_signal(&pool, dim_id, "s3", "d", false, 20, Some("fix")).await.unwrap();
+
+        let overview = get_repo_overview(&pool, &repo_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(overview.dimensions.len(), 1);
+        let dim = &overview.dimensions[0];
+        assert_eq!(dim.dimension, "Security");
+        assert_eq!(dim.passed_count, 2);
+        assert_eq!(dim.total_count, 3);
+    }
+
+    #[tokio::test]
+    async fn get_repo_overview_uses_latest_scan() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+
+        // Older scan
+        seed_full_scan(&pool, &repo_id, 40, "SILVER", "2026-01-01T10:00:00Z").await;
+        // Newer scan
+        let (_, grade_id) =
+            seed_full_scan(&pool, &repo_id, 85, "DIAMOND", "2026-03-15T10:00:00Z").await;
+        insert_dimension_score_v2(&pool, &grade_id, "Security", 90, 0.25)
+            .await
+            .unwrap();
+
+        let overview = get_repo_overview(&pool, &repo_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(overview.grade, "DIAMOND", "must use the latest scan's grade");
+    }
+
+    // ── get_repo_trends ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_repo_trends_returns_empty_for_unknown_repo() {
+        let pool = make_pool().await;
+        let result = get_repo_trends(&pool, "no-such-repo", 10)
+            .await
+            .expect("should not error");
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_repo_trends_single_scan_round_trip() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = "2026-03-15T10:00:00Z";
+        let (_, grade_id) = seed_full_scan(&pool, &repo_id, 78, "PLATINUM", now).await;
+        insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
+            .await
+            .unwrap();
+
+        let trends = get_repo_trends(&pool, &repo_id, 10).await.unwrap();
+        assert_eq!(trends.len(), 1);
+        assert_eq!(trends[0].composite, 78);
+        assert_eq!(trends[0].grade, "PLATINUM");
+        assert_eq!(trends[0].scanned_at, now);
+    }
+
+    #[tokio::test]
+    async fn get_repo_trends_dimension_scores_are_in_each_point() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        let now = "2026-03-15T10:00:00Z";
+        let (_, grade_id) = seed_full_scan(&pool, &repo_id, 75, "GOLD", now).await;
+        insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
+            .await
+            .unwrap();
+        insert_dimension_score_v2(&pool, &grade_id, "Dependency Health", 70, 0.20)
+            .await
+            .unwrap();
+
+        let trends = get_repo_trends(&pool, &repo_id, 10).await.unwrap();
+        let dims = &trends[0].dimensions;
+        assert_eq!(dims.get("Security"), Some(&80i64));
+        assert_eq!(dims.get("Dependency Health"), Some(&70i64));
+    }
+
+    #[tokio::test]
+    async fn get_repo_trends_ordered_chronologically_asc() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        seed_full_scan(&pool, &repo_id, 40, "SILVER", "2026-01-01T10:00:00Z").await;
+        seed_full_scan(&pool, &repo_id, 60, "GOLD", "2026-02-01T10:00:00Z").await;
+        seed_full_scan(&pool, &repo_id, 80, "PLATINUM", "2026-03-01T10:00:00Z").await;
+
+        let trends = get_repo_trends(&pool, &repo_id, 10).await.unwrap();
+        assert_eq!(trends.len(), 3);
+        // oldest first
+        assert_eq!(trends[0].composite, 40);
+        assert_eq!(trends[2].composite, 80);
+    }
+
+    #[tokio::test]
+    async fn get_repo_trends_respects_window() {
+        let pool = make_pool().await;
+        let repo_id = seed_repo(&pool).await;
+        for i in 1..=6i64 {
+            seed_full_scan(
+                &pool,
+                &repo_id,
+                10 * i,
+                "BRONZE",
+                &format!("2026-0{i}-01T10:00:00Z"),
+            )
+            .await;
+        }
+
+        let trends = get_repo_trends(&pool, &repo_id, 3).await.unwrap();
+        assert_eq!(trends.len(), 3, "window=3 must return at most 3 points");
+        // Should be the 3 most recent (months 4,5,6 → composite 40,50,60)
+        assert_eq!(trends[0].composite, 40);
+        assert_eq!(trends[2].composite, 60);
+    }
+}
+
 // ── Serialization tests ──────────────────────────────────────────────────────
 //
 // These are pure unit tests — no async, no DB.  They verify that the new v2

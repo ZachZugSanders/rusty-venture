@@ -1,0 +1,50 @@
+.shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 16px;
+    height: 48px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.logo {
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-right: 16px;
+    color: var(--accent);
+}
+
+.navTab {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.navTab:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.navTabActive {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.main {
+    flex: 1;
+    overflow: hidden;
+}

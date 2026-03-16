@@ -1,12 +1,12 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 use rusty_venture_actions::repo::{run_repo_analysis, AuditReport, RepoAnalysisRequest};
-use rusty_venture_store::{insert_scan, list_scans, list_scans_for_repo, open_pool, Pool};
+use rusty_venture_store::{insert_scan, list_repos, list_scans, list_scans_for_repo, open_pool, get_repo_overview, get_repo_trends, Pool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -34,6 +34,12 @@ struct ScansQuery {
     limit: Option<i64>,
 }
 
+/// Query params for GET /repos/:id/trends.
+#[derive(Debug, Deserialize)]
+struct TrendsQuery {
+    window: Option<i64>,
+}
+
 /// Success response wrapper.
 #[derive(Serialize)]
 struct ApiResponse<T> {
@@ -55,6 +61,22 @@ impl ApiError {
             error: msg.into(),
         })
     }
+}
+
+/// Build the application router from the given state.
+///
+/// Extracted from `main` so integration tests can construct a `Router`
+/// without binding to a real TCP port.
+fn build_app(state: AppState) -> Router {
+    Router::new()
+        .route("/analyze", post(analyze_handler))
+        .route("/scans", get(scans_handler))
+        .route("/repos", get(repos_handler))
+        .route("/repos/:id/overview", get(repo_overview_handler))
+        .route("/repos/:id/trends", get(repo_trends_handler))
+        .route("/health", get(health_handler))
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
 }
 
 #[tokio::main]
@@ -81,12 +103,7 @@ async fn main() {
         db: Arc::new(pool),
     };
 
-    let app = Router::new()
-        .route("/analyze", post(analyze_handler))
-        .route("/scans", get(scans_handler))
-        .route("/health", get(health_handler))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state);
+    let app = build_app(state);
 
     let addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     info!(addr = %addr, "rusty-venture-server starting");
@@ -165,5 +182,307 @@ async fn scans_handler(
             warn!(error = %e, "Failed to list scans");
             (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
         }
+    }
+}
+
+async fn repos_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match list_repos(&state.db, 100).await {
+        Ok(repos) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                success: true,
+                data: repos,
+            }),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!(error = %e, "Failed to list repos");
+            (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
+        }
+    }
+}
+
+async fn repo_overview_handler(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> impl IntoResponse {
+    match get_repo_overview(&state.db, &repo_id).await {
+        Ok(Some(overview)) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                success: true,
+                data: overview,
+            }),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            ApiError::new(format!("no overview for repo {repo_id}")),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!(repo_id = %repo_id, error = %e, "Failed to get repo overview");
+            (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
+        }
+    }
+}
+
+async fn repo_trends_handler(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+    Query(params): Query<TrendsQuery>,
+) -> impl IntoResponse {
+    let window = params.window.unwrap_or(10);
+    match get_repo_trends(&state.db, &repo_id, window).await {
+        Ok(trends) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                success: true,
+                data: trends,
+            }),
+        )
+            .into_response(),
+        Err(e) => {
+            warn!(repo_id = %repo_id, error = %e, "Failed to get repo trends");
+            (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new(e.to_string())).into_response()
+        }
+    }
+}
+
+// ── Integration tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tower::ServiceExt;
+
+    /// Create a test in-memory database, run migrations, and return the pool.
+    async fn test_pool() -> Pool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory DB");
+        sqlx::migrate!("../rusty-venture-store/migrations")
+            .run(&pool)
+            .await
+            .expect("run migrations on test DB");
+        pool
+    }
+
+    fn test_state(pool: Pool) -> AppState {
+        AppState {
+            anthropic_api_key: Arc::new("test-key".to_string()),
+            db: Arc::new(pool),
+        }
+    }
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let bytes = body.collect().await.expect("collect body").to_bytes();
+        serde_json::from_slice(&bytes).expect("parse JSON")
+    }
+
+    // ── GET /health ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn health_returns_ok() {
+        let pool = test_pool().await;
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    // ── GET /repos ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn repos_returns_200_with_empty_list() {
+        let pool = test_pool().await;
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(Request::builder().uri("/repos").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response.into_body()).await;
+        assert_eq!(json["success"], true);
+        assert!(json["data"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn repos_returns_seeded_repo() {
+        let pool = test_pool().await;
+        // Seed a repo directly
+        sqlx::query("INSERT INTO repos (id, url, first_seen) VALUES ('r1', 'https://github.com/test/repo', '2026-01-01T00:00:00Z')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(Request::builder().uri("/repos").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response.into_body()).await;
+        let repos = json["data"].as_array().unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0]["url"], "https://github.com/test/repo");
+    }
+
+    // ── GET /repos/:id/overview ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn repo_overview_returns_404_for_unknown_repo() {
+        let pool = test_pool().await;
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/repos/no-such-repo/overview")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn repo_overview_returns_200_with_correct_shape() {
+        let pool = test_pool().await;
+        let repo_id = "test-repo-1";
+        let now = "2026-03-15T10:00:00Z";
+        let grade_id = "grade-1";
+        let model_id = "model-v2.0.0";
+
+        sqlx::query("INSERT INTO repos (id, url, first_seen) VALUES (?1, 'https://github.com/test/r', ?2)")
+            .bind(repo_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO scans (id, repo_id, scanned_at, duration_ms, risk_score, composite_maturity, maturity_grade, raw_report, raw_maturity) VALUES (?1, ?2, ?3, 100, 5, 75, 'GOLD', '{}', '{}')")
+            .bind("scan-1")
+            .bind(repo_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT OR IGNORE INTO grade_models (id, version, description, created_at) VALUES (?1, '2.0.0', 'test', ?2)")
+            .bind(model_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO scan_grades (id, scan_id, model_id, composite, grade, created_at) VALUES (?1, 'scan-1', ?2, 75, 'GOLD', ?3)")
+            .bind(grade_id)
+            .bind(model_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/repos/{repo_id}/overview"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response.into_body()).await;
+        assert_eq!(json["success"], true);
+        let data = &json["data"];
+        assert_eq!(data["repo_id"], repo_id);
+        assert_eq!(data["composite"], 75);
+        assert_eq!(data["grade"], "GOLD");
+        assert!(data["dimensions"].is_array());
+        assert!(data["top_blockers"].is_array());
+        assert!(data["confidence"].is_number());
+    }
+
+    // ── GET /repos/:id/trends ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn repo_trends_returns_200_empty_for_unknown_repo() {
+        let pool = test_pool().await;
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/repos/no-such-repo/trends?window=5")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response.into_body()).await;
+        assert_eq!(json["success"], true);
+        assert!(json["data"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn repo_trends_returns_correct_point_shape() {
+        let pool = test_pool().await;
+        let repo_id = "trends-repo";
+        let now = "2026-03-15T10:00:00Z";
+        let model_id = "model-v2.0.0";
+
+        sqlx::query("INSERT INTO repos (id, url, first_seen) VALUES (?1, 'https://github.com/test/r2', ?2)")
+            .bind(repo_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO scans (id, repo_id, scanned_at, duration_ms, risk_score, composite_maturity, maturity_grade, raw_report, raw_maturity) VALUES ('scan-t1', ?1, ?2, 100, 5, 80, 'PLATINUM', '{}', '{}')")
+            .bind(repo_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT OR IGNORE INTO grade_models (id, version, description, created_at) VALUES (?1, '2.0.0', 'test', ?2)")
+            .bind(model_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO scan_grades (id, scan_id, model_id, composite, grade, created_at) VALUES ('grade-t1', 'scan-t1', ?1, 80, 'PLATINUM', ?2)")
+            .bind(model_id)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/repos/{repo_id}/trends?window=10"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response.into_body()).await;
+        assert_eq!(json["success"], true);
+        let points = json["data"].as_array().unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0]["composite"], 80);
+        assert_eq!(points[0]["grade"], "PLATINUM");
+        assert_eq!(points[0]["scanned_at"], now);
+        assert!(points[0]["dimensions"].is_object());
     }
 }

@@ -135,3 +135,63 @@ pub struct DecisionGraphRow {
     /// ISO 8601 timestamp.
     pub created_at: String,
 }
+
+// ── Overview / trend view models ──────────────────────────────────────────────
+
+/// Summary row returned by `list_repos`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoSummary {
+    pub id: String,
+    pub url: String,
+    pub first_seen: String,
+    pub last_scanned: Option<String>,
+    pub scan_count: i64,
+    pub latest_maturity_grade: Option<String>,
+    pub latest_composite_maturity: Option<i64>,
+    pub latest_risk_score: Option<i64>,
+}
+
+/// Per-dimension breakdown inside a `RepoOverview`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DimensionOverview {
+    pub dimension: String,
+    pub score: i64,
+    pub weight: f64,
+    pub passed_count: i64,
+    pub total_count: i64,
+}
+
+/// One failed signal that blocked the score — returned as part of `RepoOverview`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockerItem {
+    pub signal_name: String,
+    pub dimension: String,
+    pub points: i64,
+    pub detail: Option<String>,
+}
+
+/// Full overview payload for `GET /repos/:id/overview`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoOverview {
+    pub repo_id: String,
+    pub repo_url: String,
+    /// Weighted composite score, 0–100.
+    pub composite: i64,
+    /// League-tier label.
+    pub grade: String,
+    /// Percentage of signals that passed (0.0–100.0).
+    pub confidence: f64,
+    pub dimensions: Vec<DimensionOverview>,
+    /// Up to 5 failed signals with highest point values.
+    pub top_blockers: Vec<BlockerItem>,
+}
+
+/// One data point in the trend series returned by `GET /repos/:id/trends`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrendPoint {
+    pub scanned_at: String,
+    pub composite: i64,
+    pub grade: String,
+    /// Score per dimension at this point in time.
+    pub dimensions: std::collections::HashMap<String, i64>,
+}

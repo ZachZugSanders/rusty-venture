@@ -546,3 +546,244 @@ pub async fn list_scans_for_repo(pool: &Pool, repo_url: &str, limit: i64) -> Res
         })
         .collect())
 }
+
+// ── Overview / trend queries ──────────────────────────────────────────────────
+
+/// Return a summary of every tracked repository, ordered by `last_scanned DESC`.
+///
+/// Each row includes the total scan count and, if at least one v2 grade exists,
+/// the grade/composite/risk from the latest scan.
+pub async fn list_repos(pool: &Pool, limit: i64) -> Result<Vec<crate::models::RepoSummary>> {
+    let rows = sqlx::query(
+        r#"SELECT
+               r.id,
+               r.url,
+               r.first_seen,
+               r.last_scanned,
+               COUNT(s.id)                                                       AS scan_count,
+               (SELECT sg.grade        FROM scan_grades sg
+                JOIN scans ss ON ss.id = sg.scan_id
+                WHERE ss.repo_id = r.id ORDER BY ss.scanned_at DESC LIMIT 1)    AS latest_maturity_grade,
+               (SELECT sg.composite    FROM scan_grades sg
+                JOIN scans ss ON ss.id = sg.scan_id
+                WHERE ss.repo_id = r.id ORDER BY ss.scanned_at DESC LIMIT 1)    AS latest_composite_maturity,
+               (SELECT ss2.risk_score  FROM scans ss2
+                WHERE ss2.repo_id = r.id ORDER BY ss2.scanned_at DESC LIMIT 1)  AS latest_risk_score
+           FROM repos r
+           LEFT JOIN scans s ON s.repo_id = r.id
+           GROUP BY r.id
+           ORDER BY r.last_scanned DESC
+           LIMIT ?1"#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .context("list_repos")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| crate::models::RepoSummary {
+            id: r.get::<String, _>("id"),
+            url: r.get::<String, _>("url"),
+            first_seen: r.get::<String, _>("first_seen"),
+            last_scanned: r.try_get::<Option<String>, _>("last_scanned").unwrap_or(None),
+            scan_count: r.get::<i64, _>("scan_count"),
+            latest_maturity_grade: r.try_get::<Option<String>, _>("latest_maturity_grade").unwrap_or(None),
+            latest_composite_maturity: r.try_get::<Option<i64>, _>("latest_composite_maturity").unwrap_or(None),
+            latest_risk_score: r.try_get::<Option<i64>, _>("latest_risk_score").unwrap_or(None),
+        })
+        .collect())
+}
+
+/// Return a full overview for the given repo, or `None` if the repo has no v2
+/// grade yet (or the repo ID does not exist).
+pub async fn get_repo_overview(
+    pool: &Pool,
+    repo_id: &str,
+) -> Result<Option<crate::models::RepoOverview>> {
+    // 1. Find the latest scan that has a v2 grade.
+    let grade_row = sqlx::query(
+        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, r.url AS repo_url
+           FROM scan_grades sg
+           JOIN scans s  ON s.id  = sg.scan_id
+           JOIN repos  r ON r.id  = s.repo_id
+           WHERE r.id = ?1
+           ORDER BY s.scanned_at DESC
+           LIMIT 1"#,
+    )
+    .bind(repo_id)
+    .fetch_optional(pool)
+    .await
+    .context("get_repo_overview: fetch latest grade")?;
+
+    let Some(grade_row) = grade_row else {
+        return Ok(None);
+    };
+
+    let grade_id: String  = grade_row.get("grade_id");
+    let composite: i64    = grade_row.get("composite");
+    let grade: String     = grade_row.get("grade");
+    let repo_url: String  = grade_row.get("repo_url");
+
+    // 2. Fetch dimension scores + signals for that grade.
+    let dim_rows = sqlx::query(
+        r#"SELECT d.id AS dim_id, d.dimension, d.score, d.weight,
+                  s.name, s.passed, s.points, s.detail
+           FROM scan_dimension_scores_v2 d
+           LEFT JOIN scan_signals s ON s.dimension_score_id = d.id
+           WHERE d.scan_grade_id = ?1"#,
+    )
+    .bind(&grade_id)
+    .fetch_all(pool)
+    .await
+    .context("get_repo_overview: fetch dimensions+signals")?;
+
+    // 3. Aggregate into overview structures.
+    use std::collections::HashMap;
+
+    struct DimAccum {
+        dimension: String,
+        score: i64,
+        weight: f64,
+        passed: i64,
+        total: i64,
+    }
+
+    let mut dims: HashMap<String, DimAccum> = HashMap::new();
+    let mut all_signals: Vec<crate::models::BlockerItem> = Vec::new();
+    let mut total_signals: i64 = 0;
+    let mut passed_signals: i64 = 0;
+
+    for row in &dim_rows {
+        let dimension: String = row.get("dimension");
+        let score: i64        = row.get("score");
+        let weight: f64       = row.get("weight");
+        let dim_entry = dims.entry(dimension.clone()).or_insert(DimAccum {
+            dimension: dimension.clone(),
+            score,
+            weight,
+            passed: 0,
+            total: 0,
+        });
+
+        // Signals are LEFT JOINed — a dimension with no signals yields one NULL row.
+        if let Ok(name) = row.try_get::<String, _>("name") {
+            let passed: bool = row.get::<i64, _>("passed") != 0;
+            let points: i64  = row.get("points");
+            let detail: Option<String> = row.try_get("detail").ok().flatten();
+
+            dim_entry.total += 1;
+            total_signals += 1;
+            if passed {
+                dim_entry.passed += 1;
+                passed_signals += 1;
+            } else {
+                all_signals.push(crate::models::BlockerItem {
+                    signal_name: name,
+                    dimension: dimension.clone(),
+                    points,
+                    detail,
+                });
+            }
+        }
+    }
+
+    let confidence = if total_signals == 0 {
+        0.0
+    } else {
+        passed_signals as f64 / total_signals as f64 * 100.0
+    };
+
+    let mut top_blockers = all_signals;
+    top_blockers.sort_by(|a, b| b.points.cmp(&a.points));
+    top_blockers.truncate(5);
+
+    let dimensions: Vec<crate::models::DimensionOverview> = dims
+        .into_values()
+        .map(|d| crate::models::DimensionOverview {
+            dimension: d.dimension,
+            score: d.score,
+            weight: d.weight,
+            passed_count: d.passed,
+            total_count: d.total,
+        })
+        .collect();
+
+    Ok(Some(crate::models::RepoOverview {
+        repo_id: repo_id.to_string(),
+        repo_url,
+        composite,
+        grade,
+        confidence,
+        dimensions,
+        top_blockers,
+    }))
+}
+
+/// Return the trend series for a repo — up to `window` most-recent scan points,
+/// ordered oldest-first (so sparklines display left-to-right chronologically).
+pub async fn get_repo_trends(
+    pool: &Pool,
+    repo_id: &str,
+    window: i64,
+) -> Result<Vec<crate::models::TrendPoint>> {
+    // Fetch the N most-recent grades with their scan timestamps.
+    let grade_rows = sqlx::query(
+        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, s.scanned_at
+           FROM scan_grades sg
+           JOIN scans s ON s.id = sg.scan_id
+           JOIN repos  r ON r.id = s.repo_id
+           WHERE r.id = ?1
+           ORDER BY s.scanned_at DESC
+           LIMIT ?2"#,
+    )
+    .bind(repo_id)
+    .bind(window)
+    .fetch_all(pool)
+    .await
+    .context("get_repo_trends: fetch grades")?;
+
+    if grade_rows.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Collect grade ids to fetch dimension scores.
+    let grade_ids: Vec<String> = grade_rows.iter().map(|r| r.get("grade_id")).collect();
+
+    // Build a map grade_id → HashMap<dimension, score>.
+    let mut dim_map: std::collections::HashMap<String, std::collections::HashMap<String, i64>> =
+        std::collections::HashMap::new();
+
+    for gid in &grade_ids {
+        let dim_rows = sqlx::query(
+            "SELECT dimension, score FROM scan_dimension_scores_v2 WHERE scan_grade_id = ?1",
+        )
+        .bind(gid)
+        .fetch_all(pool)
+        .await
+        .context("get_repo_trends: fetch dimensions")?;
+
+        let entry = dim_map.entry(gid.clone()).or_default();
+        for d in dim_rows {
+            entry.insert(d.get("dimension"), d.get("score"));
+        }
+    }
+
+    // Assemble points, then reverse to oldest-first.
+    let mut points: Vec<crate::models::TrendPoint> = grade_rows
+        .into_iter()
+        .map(|r| {
+            let gid: String = r.get("grade_id");
+            let dims = dim_map.remove(&gid).unwrap_or_default();
+            crate::models::TrendPoint {
+                scanned_at: r.get("scanned_at"),
+                composite: r.get("composite"),
+                grade: r.get("grade"),
+                dimensions: dims,
+            }
+        })
+        .collect();
+
+    points.reverse(); // oldest first
+    Ok(points)
+}
