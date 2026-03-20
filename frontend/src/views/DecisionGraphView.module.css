@@ -1,0 +1,199 @@
+.root {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+    color: #e2e8f0;
+    background: #0f172a;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.sidebar {
+    width: 220px;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-right: 1px solid #1e293b;
+    overflow-y: auto;
+    background: #0f172a;
+    padding: 0.75rem 0.5rem;
+}
+
+.selectorWrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.label {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.select {
+    background: #1e293b;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.72rem;
+    width: 100%;
+}
+
+/* ── Filters ─────────────────────────────────────────────────────────────── */
+.filterPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.5rem;
+    background: #1e293b;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+}
+
+.filterTitle {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.2rem;
+}
+
+.filterPanel label {
+    font-size: 0.78rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    cursor: pointer;
+}
+
+.nodeCountLabel {
+    font-size: 0.7rem;
+    color: #64748b;
+    margin: 0.3rem 0 0;
+}
+
+/* ── Node list ───────────────────────────────────────────────────────────── */
+.nodeList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.nodeListItem {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: #cbd5e1;
+}
+
+.nodeListItem:hover {
+    background: #1e293b;
+}
+
+.nodeListItemActive {
+    background: #1e293b;
+    outline: 1px solid #38bdf8;
+}
+
+.nodeListItemHighlight {
+    color: #fca5a5;
+}
+
+.nodeKindDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.nodeListLabel {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 155px;
+}
+
+/* ── Canvas wrap ─────────────────────────────────────────────────────────── */
+.canvasWrap {
+    flex: 1;
+    position: relative;
+    background: #0f172a;
+}
+
+.loadingMsg,
+.errorMsg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.9rem;
+    color: #94a3b8;
+}
+
+.errorMsg {
+    color: #f87171;
+}
+
+/* ── Inspector ───────────────────────────────────────────────────────────── */
+.inspector {
+    width: 220px;
+    min-width: 180px;
+    padding: 0.75rem 0.6rem;
+    border-left: 1px solid #1e293b;
+    overflow-y: auto;
+    background: #0f172a;
+}
+
+.inspectorTitle {
+    font-size: 0.7rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.6rem;
+}
+
+.placeholder {
+    font-size: 0.78rem;
+    color: #475569;
+    margin: 0;
+}
+
+.nodeDetail {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.15rem 0.5rem;
+    font-size: 0.76rem;
+}
+
+.nodeDetail dt {
+    color: #64748b;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.nodeDetail dd {
+    margin: 0;
+    color: #e2e8f0;
+    overflow-wrap: break-word;
+    word-break: break-all;
+}
+
+.highlightBadge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-size: 0.7rem;
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+    background: #7f1d1d;
+    color: #fca5a5;
+}

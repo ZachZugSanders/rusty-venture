@@ -228,6 +228,7 @@ pub async fn list_scans(pool: &Pool, limit: i64) -> Result<Vec<ScanSummary>> {
         .collect())
 }
 
+
 // ── v2 query API ─────────────────────────────────────────────────────────────
 
 /// Insert or ignore a grade model row (idempotent by primary key).
@@ -513,6 +514,58 @@ pub async fn backfill_v2_grades(pool: &Pool) -> Result<usize> {
     Ok(count)
 }
 
+// ── Scan detail query ─────────────────────────────────────────────────────────
+
+/// Full scan detail including raw JSON fields for a single scan id.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScanDetail {
+    pub id: String,
+    pub repo_url: String,
+    pub scanned_at: String,
+    pub duration_ms: i64,
+    pub risk_score: u8,
+    pub composite_maturity: u8,
+    pub maturity_grade: String,
+    /// Parsed `FinalReport` JSON value.
+    pub report: serde_json::Value,
+    /// Parsed `MaturityScore` JSON value.
+    pub maturity: serde_json::Value,
+}
+
+/// Fetch a single scan by id, with full report payload.
+pub async fn get_scan(pool: &Pool, scan_id: &str) -> Result<Option<ScanDetail>> {
+    let row = sqlx::query(
+        r#"SELECT s.id, r.url, s.scanned_at, s.duration_ms,
+                  s.risk_score, s.composite_maturity, s.maturity_grade,
+                  s.raw_report, s.raw_maturity
+           FROM scans s
+           JOIN repos r ON r.id = s.repo_id
+           WHERE s.id = ?1"#,
+    )
+    .bind(scan_id)
+    .fetch_optional(pool)
+    .await
+    .context("get scan")?;
+
+    let Some(r) = row else { return Ok(None) };
+
+    let report: serde_json::Value =
+        serde_json::from_str(&r.get::<String, _>("raw_report")).unwrap_or(serde_json::Value::Null);
+    let maturity: serde_json::Value =
+        serde_json::from_str(&r.get::<String, _>("raw_maturity")).unwrap_or(serde_json::Value::Null);
+
+    Ok(Some(ScanDetail {
+        id: r.get::<String, _>("id"),
+        repo_url: r.get::<String, _>("url"),
+        scanned_at: r.get::<String, _>("scanned_at"),
+        duration_ms: r.get::<i64, _>("duration_ms"),
+        risk_score: r.get::<i64, _>("risk_score") as u8,
+        composite_maturity: r.get::<i64, _>("composite_maturity") as u8,
+        maturity_grade: r.get::<String, _>("maturity_grade"),
+        report,
+        maturity,
+    }))
+}
 
 // ── v1 list helpers ───────────────────────────────────────────────────────────
 

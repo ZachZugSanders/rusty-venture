@@ -16,3 +16,10 @@ anyhow.workspace = true
 tracing.workspace = true
 futures.workspace = true
 tokio-stream.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "graph_bench"
+harness = false

@@ -157,6 +157,59 @@ def _trends_stub(repo_id: str = "repo-00") -> list:
     ]
 
 
+def _decision_graph_stub(scan_id: str = "scan-diamond-0") -> dict:
+    """Return a DecisionGraph-shaped payload for mock API responses."""
+    return {
+        "nodes": [
+            {
+                "id": "root",
+                "label": "Composite 92",
+                "kind": "root",
+                "x": 0.0,
+                "y": 92.0,
+                "z": 0.0,
+                "passed": True,
+                "highlight": False,
+            },
+            {
+                "id": "dim:Security",
+                "label": "Security",
+                "kind": "dimension",
+                "x": 0.25,
+                "y": 95.0,
+                "z": 0.0,
+                "passed": True,
+                "highlight": False,
+            },
+            {
+                "id": "sig:Security:no_critical_cves",
+                "label": "No critical CVEs",
+                "kind": "signal",
+                "x": 0.25,
+                "y": 40.0,
+                "z": 40.0,
+                "passed": True,
+                "highlight": False,
+            },
+            {
+                "id": "sig:Security:has_security_policy",
+                "label": "Has SECURITY.md",
+                "kind": "signal",
+                "x": 0.25,
+                "y": 0.0,
+                "z": 20.0,
+                "passed": False,
+                "highlight": True,
+            },
+        ],
+        "edges": [
+            {"from": "root", "to": "dim:Security"},
+            {"from": "dim:Security", "to": "sig:Security:no_critical_cves"},
+            {"from": "dim:Security", "to": "sig:Security:has_security_policy"},
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Per-test API route mocks
 # ---------------------------------------------------------------------------
@@ -179,6 +232,9 @@ def mock_api(page):
     )
     overview_payload = json.dumps({"success": True, "data": _overview_stub()})
     trends_payload = json.dumps({"success": True, "data": _trends_stub()})
+    decision_graph_payload = json.dumps(
+        {"success": True, "data": _decision_graph_stub()}
+    )
 
     def handle_scans(route):
         route.fulfill(status=200, content_type="application/json", body=scans_payload)
@@ -194,8 +250,14 @@ def mock_api(page):
     def handle_trends(route):
         route.fulfill(status=200, content_type="application/json", body=trends_payload)
 
+    def handle_decision_graph(route):
+        route.fulfill(
+            status=200, content_type="application/json", body=decision_graph_payload
+        )
+
     page.route("**/scans**", handle_scans)
     page.route("**/repos**", handle_repos)
     # Register more specific routes AFTER so they take precedence over **/repos**
     page.route("**/overview**", handle_overview)
     page.route("**/trends**", handle_trends)
+    page.route("**/decision-graph**", handle_decision_graph)

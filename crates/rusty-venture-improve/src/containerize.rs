@@ -13,6 +13,45 @@ use rusty_venture_llm::{LlmConnector, LlmRequestBuilder};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+// ── Injectable runner traits ─────────────────────────────────────────────────
+
+/// Abstracts Docker build + image-remove operations so tests can inject a mock.
+#[async_trait]
+pub trait BuildRunner: Send + Sync {
+    async fn build(&self, context_dir: &Path, tag: &str) -> Result<(), String>;
+    async fn remove_image(&self, tag: &str) -> Result<(), String>;
+}
+
+/// Abstracts repository cloning so tests can inject a no-op mock.
+#[async_trait]
+pub trait RepoCloner: Send + Sync {
+    async fn clone_repo(&self, repo_url: &str, dest: &Path) -> Result<(), CoreError>;
+}
+
+/// Production `BuildRunner` — delegates to the `docker` CLI.
+pub struct DockerBuildRunner;
+
+#[async_trait]
+impl BuildRunner for DockerBuildRunner {
+    async fn build(&self, context_dir: &Path, tag: &str) -> Result<(), String> {
+        docker_build(context_dir, tag).await
+    }
+
+    async fn remove_image(&self, tag: &str) -> Result<(), String> {
+        docker_rmi(tag).await
+    }
+}
+
+/// Production `RepoCloner` — delegates to `git clone`.
+pub struct GitCloner;
+
+#[async_trait]
+impl RepoCloner for GitCloner {
+    async fn clone_repo(&self, repo_url: &str, dest: &Path) -> Result<(), CoreError> {
+        shallow_clone(repo_url, dest).await
+    }
+}
+
 pub const CTX_CONTAINERIZE_RESULT: &str = "improve.containerize_result";
 
 // ── Result type ───────────────────────────────────────────────────────────────
@@ -45,6 +84,10 @@ pub struct ContainerizeAction<C> {
     connector: Arc<C>,
     /// Maximum LLM-fix iterations after the first build attempt.
     max_fix_iterations: u32,
+    /// Abstracted Docker runner — swappable for tests.
+    build_runner: Arc<dyn BuildRunner>,
+    /// Abstracted repo cloner — swappable for tests.
+    cloner: Arc<dyn RepoCloner>,
 }
 
 impl<C: LlmConnector + 'static> ContainerizeAction<C> {
@@ -52,11 +95,25 @@ impl<C: LlmConnector + 'static> ContainerizeAction<C> {
         Self {
             connector,
             max_fix_iterations: 5,
+            build_runner: Arc::new(DockerBuildRunner),
+            cloner: Arc::new(GitCloner),
         }
     }
 
     pub fn max_fix_iterations(mut self, n: u32) -> Self {
         self.max_fix_iterations = n;
+        self
+    }
+
+    /// Override the Docker build runner (inject a mock in tests).
+    pub fn with_build_runner(mut self, runner: Arc<dyn BuildRunner>) -> Self {
+        self.build_runner = runner;
+        self
+    }
+
+    /// Override the repo cloner (inject a no-op mock in tests).
+    pub fn with_cloner(mut self, cloner: Arc<dyn RepoCloner>) -> Self {
+        self.cloner = cloner;
         self
     }
 }
@@ -88,7 +145,7 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
         let temp_dir = tempfile::tempdir()
             .map_err(|e| CoreError::other(format!("Failed to create temp dir: {e}")))?;
 
-        shallow_clone(&repo_url, temp_dir.path()).await?;
+        self.cloner.clone_repo(&repo_url, temp_dir.path()).await?;
         info!(path = %temp_dir.path().display(), "Repo cloned for containerization");
 
         // ── 2. Check what already exists ──────────────────────────────────
@@ -152,13 +209,13 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
 
             info!(attempt, tag = %image_tag, "Running docker build");
 
-            match docker_build(temp_dir.path(), &image_tag).await {
+            match self.build_runner.build(temp_dir.path(), &image_tag).await {
                 Ok(()) => {
                     info!(attempt, "Docker build succeeded");
                     build_validated = true;
 
                     // Clean up the test image (best-effort).
-                    let _ = docker_rmi(&image_tag).await;
+                    let _ = self.build_runner.remove_image(&image_tag).await;
                     break;
                 }
                 Err(build_error) => {
@@ -500,5 +557,249 @@ fn looks_like_service(lang: &Language, deps: &DependencyReport) -> bool {
         // Libraries in these languages are less common as containerised services.
         Language::Ruby => true, // Rails apps are almost always services
         _ => false,
+    }
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusty_venture_core::context::ExecutionContext;
+    use rusty_venture_llm::{
+        LlmConnector,
+        types::{ContentBlock, LlmError, LlmRequest, LlmResponse, Usage},
+    };
+    use rusty_venture_actions::repo::{
+        CTX_DEPENDENCY_REPORT, CTX_DETECTED_LANGUAGES, CTX_REPO_URL,
+        analyze_deps::{Dependency, DependencyKind, DependencyReport},
+        detect_language::{DetectedLanguages, Language},
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Canned Dockerfile the mock LLM returns for every request.
+    const FAKE_DF: &str = "FROM rust:1-slim AS builder\nWORKDIR /app\nCMD []";
+
+    // ── Mock LLM connector ────────────────────────────────────────────────
+
+    struct MockConnector {
+        response: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmConnector for MockConnector {
+        async fn complete(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            Ok(LlmResponse {
+                id: "mock".to_string(),
+                model: "mock-model".to_string(),
+                content: vec![ContentBlock::Text { text: self.response.to_string() }],
+                stop_reason: "end_turn".to_string(),
+                usage: Usage { input_tokens: 1, output_tokens: 1 },
+            })
+        }
+
+        fn model_id(&self) -> &str {
+            "mock-model"
+        }
+    }
+
+    // ── Mock repo cloner (no-op) ──────────────────────────────────────────
+
+    struct MockCloner;
+
+    #[async_trait::async_trait]
+    impl RepoCloner for MockCloner {
+        async fn clone_repo(
+            &self,
+            _url: &str,
+            _dest: &std::path::Path,
+        ) -> Result<(), rusty_venture_core::CoreError> {
+            Ok(())
+        }
+    }
+
+    // ── Mock build runner ─────────────────────────────────────────────────
+
+    struct MockBuildRunner {
+        outcomes: Mutex<Vec<Result<(), String>>>,
+    }
+
+    impl MockBuildRunner {
+        /// Always returns `Ok(())` (empty queue → `unwrap_or(Ok(()))`).
+        fn always_ok() -> Arc<Self> {
+            Arc::new(Self { outcomes: Mutex::new(vec![]) })
+        }
+
+        /// Returns outcomes in the order provided; running out reverts to `Ok(())`.
+        fn with_outcomes(mut v: Vec<Result<(), String>>) -> Arc<Self> {
+            v.reverse(); // pop() takes from the end → preserves original order
+            Arc::new(Self { outcomes: Mutex::new(v) })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl BuildRunner for MockBuildRunner {
+        async fn build(&self, _ctx: &std::path::Path, _tag: &str) -> Result<(), String> {
+            self.outcomes.lock().unwrap().pop().unwrap_or(Ok(()))
+        }
+
+        async fn remove_image(&self, _tag: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+
+    fn make_action(
+        response: &'static str,
+        build_outcomes: Vec<Result<(), String>>,
+    ) -> ContainerizeAction<MockConnector> {
+        ContainerizeAction::new(Arc::new(MockConnector { response }))
+            .with_build_runner(MockBuildRunner::with_outcomes(build_outcomes))
+            .with_cloner(Arc::new(MockCloner))
+    }
+
+    async fn ctx_with_url() -> ExecutionContext {
+        let ctx = ExecutionContext::new("test");
+        ctx.insert(CTX_REPO_URL, "https://example.com/repo.git".to_string()).await;
+        ctx
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn dockerfile_content_comes_from_llm() {
+        let action = make_action(FAKE_DF, vec![]);
+        let result = action.execute(&ctx_with_url().await, ()).await.expect("should succeed");
+        assert_eq!(result.dockerfile_content, FAKE_DF);
+    }
+
+    #[tokio::test]
+    async fn validates_on_first_attempt() {
+        let action = make_action(FAKE_DF, vec![]);
+        let result = action.execute(&ctx_with_url().await, ()).await.unwrap();
+        assert!(result.build_validated);
+        assert_eq!(result.fix_iterations, 0);
+    }
+
+    #[tokio::test]
+    async fn one_build_failure_then_success_sets_fix_iterations_one() {
+        let action = make_action(
+            FAKE_DF,
+            vec![Err("build error: missing dep".to_string()), Ok(())],
+        );
+        let result = action.execute(&ctx_with_url().await, ()).await.unwrap();
+        assert!(result.build_validated);
+        assert_eq!(result.fix_iterations, 1);
+    }
+
+    #[tokio::test]
+    async fn stops_at_max_fix_iterations_when_all_builds_fail() {
+        let fails: Vec<_> = (0..3).map(|_| Err("e".to_string())).collect();
+        let action = make_action(FAKE_DF, fails).max_fix_iterations(2);
+        let result = action.execute(&ctx_with_url().await, ()).await.unwrap();
+        assert!(!result.build_validated);
+        assert_eq!(result.fix_iterations, 2);
+    }
+
+    #[tokio::test]
+    async fn default_max_fix_iterations_is_five() {
+        let fails: Vec<_> = (0..6).map(|_| Err("e".to_string())).collect();
+        let action = make_action(FAKE_DF, fails);
+        let result = action.execute(&ctx_with_url().await, ()).await.unwrap();
+        assert!(!result.build_validated);
+        assert_eq!(result.fix_iterations, 5);
+    }
+
+    #[tokio::test]
+    async fn result_stored_in_context() {
+        let action = make_action(FAKE_DF, vec![]);
+        let ctx = ctx_with_url().await;
+        action.execute(&ctx, ()).await.unwrap();
+        let stored: Option<ContainerizeResult> =
+            ctx.get::<ContainerizeResult>(CTX_CONTAINERIZE_RESULT).await;
+        assert!(stored.is_some());
+    }
+
+    #[tokio::test]
+    async fn dockerfile_path_is_dockerfile() {
+        let action = make_action(FAKE_DF, vec![]);
+        let result = action.execute(&ctx_with_url().await, ()).await.unwrap();
+        assert_eq!(result.dockerfile_path, "Dockerfile");
+    }
+
+    #[tokio::test]
+    async fn missing_repo_url_returns_error() {
+        let action = make_action(FAKE_DF, vec![]);
+        let ctx = ExecutionContext::new("test"); // no CTX_REPO_URL set
+        assert!(
+            action.execute(&ctx, ()).await.is_err(),
+            "should fail without repo URL in context"
+        );
+    }
+
+    #[tokio::test]
+    async fn compose_not_generated_for_unknown_language() {
+        let action = make_action(FAKE_DF, vec![]);
+        let ctx = ctx_with_url().await;
+        // Default DetectedLanguages → Language::Unknown → looks_like_service = false
+        let result = action.execute(&ctx, ()).await.unwrap();
+        assert!(result.compose_content.is_none());
+    }
+
+    #[tokio::test]
+    async fn compose_generated_for_node_with_express_dep() {
+        let action = make_action(FAKE_DF, vec![]);
+        let ctx = ctx_with_url().await;
+        ctx.insert(
+            CTX_DETECTED_LANGUAGES,
+            DetectedLanguages { primary: Language::Node, secondary: vec![], scores: vec![] },
+        )
+        .await;
+        ctx.insert(
+            CTX_DEPENDENCY_REPORT,
+            DependencyReport {
+                language: Language::Node,
+                dependencies: vec![Dependency {
+                    name: "express".to_string(),
+                    version: Some("4.18.0".to_string()),
+                    kind: DependencyKind::Runtime,
+                }],
+                lock_file_present: true,
+                manifest_file: "package.json".to_string(),
+                raw_output: String::new(),
+            },
+        )
+        .await;
+        let result = action.execute(&ctx, ()).await.unwrap();
+        assert!(result.compose_content.is_some());
+    }
+
+    #[tokio::test]
+    async fn compose_not_generated_for_rust_library_without_server_deps() {
+        let action = make_action(FAKE_DF, vec![]);
+        let ctx = ctx_with_url().await;
+        ctx.insert(
+            CTX_DETECTED_LANGUAGES,
+            DetectedLanguages { primary: Language::Rust, secondary: vec![], scores: vec![] },
+        )
+        .await;
+        ctx.insert(
+            CTX_DEPENDENCY_REPORT,
+            DependencyReport {
+                language: Language::Rust,
+                dependencies: vec![Dependency {
+                    name: "serde".to_string(),
+                    version: Some("1.0".to_string()),
+                    kind: DependencyKind::Runtime,
+                }],
+                lock_file_present: true,
+                manifest_file: "Cargo.toml".to_string(),
+                raw_output: String::new(),
+            },
+        )
+        .await;
+        let result = action.execute(&ctx, ()).await.unwrap();
+        assert!(result.compose_content.is_none());
     }
 }

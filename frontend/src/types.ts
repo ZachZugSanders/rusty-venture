@@ -55,3 +55,27 @@ export interface ApiResponse<T> {
     success: boolean
     data: T
 }
+
+// ── Decision Graph ───────────────────────────────────────────────────────────
+
+export interface GraphNode {
+    id: string
+    label: string
+    kind: 'root' | 'dimension' | 'signal'
+    x: number
+    y: number
+    z: number
+    passed: boolean
+    highlight: boolean
+}
+
+export interface GraphEdge {
+    from: string
+    to: string
+}
+
+export interface DecisionGraph {
+    nodes: GraphNode[]
+    edges: GraphEdge[]
+}
+

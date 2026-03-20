@@ -20,6 +20,7 @@ serde_json.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+dotenvy.workspace = true
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

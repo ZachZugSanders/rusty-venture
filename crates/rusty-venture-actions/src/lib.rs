@@ -1,4 +1,5 @@
 pub mod container;
+pub mod graph;
 pub mod repo;
 
 pub use container::{
@@ -11,3 +12,4 @@ pub use repo::{
     GovernanceCheckAction, GovernanceReport, MaturityDimension, MaturityGrade, MaturityScore,
     RepoAnalysisRequest, RepoAnalysisResult,
 };
+pub use graph::{DecisionGraph, GraphEdge, GraphNode};

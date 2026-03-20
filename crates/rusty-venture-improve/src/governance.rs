@@ -348,3 +348,340 @@ ignore_missing_imports = True
         _ => None,
     }
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusty_venture_actions::repo::detect_language::Language;
+    use rusty_venture_actions::repo::governance::GovernanceReport;
+    use rusty_venture_actions::repo::{CTX_DETECTED_LANGUAGES, CTX_GOVERNANCE_REPORT};
+    use rusty_venture_core::context::ExecutionContext;
+
+    // ── Fixtures ─────────────────────────────────────────────────────────────
+
+    fn all_missing_report() -> GovernanceReport {
+        GovernanceReport::default() // all booleans default to false → everything missing
+    }
+
+    fn all_present_report() -> GovernanceReport {
+        GovernanceReport {
+            has_license: true,
+            has_security_policy: true,
+            has_contributing: true,
+            has_changelog: true,
+            has_dependabot: true,
+            has_lint_config: true,
+            has_safety_config: true,
+            ..Default::default()
+        }
+    }
+
+    fn rust_languages() -> DetectedLanguages {
+        DetectedLanguages {
+            primary: Language::Rust,
+            secondary: vec![],
+            scores: vec![(Language::Rust, 10)],
+        }
+    }
+
+    fn node_languages() -> DetectedLanguages {
+        DetectedLanguages {
+            primary: Language::Node,
+            secondary: vec![],
+            scores: vec![(Language::Node, 10)],
+        }
+    }
+
+    fn python_languages() -> DetectedLanguages {
+        DetectedLanguages {
+            primary: Language::Python,
+            secondary: vec![],
+            scores: vec![(Language::Python, 9)],
+        }
+    }
+
+    fn unknown_languages() -> DetectedLanguages {
+        DetectedLanguages {
+            primary: Language::Unknown,
+            secondary: vec![],
+            scores: vec![],
+        }
+    }
+
+    async fn run_action(gov: GovernanceReport, langs: DetectedLanguages) -> Vec<GovernanceFile> {
+        let ctx = ExecutionContext::new("test");
+        ctx.insert(CTX_GOVERNANCE_REPORT, gov).await;
+        ctx.insert(CTX_DETECTED_LANGUAGES, langs).await;
+        GenerateGovernanceFilesAction
+            .execute(&ctx, ())
+            .await
+            .expect("action must not fail")
+    }
+
+    fn paths(files: &[GovernanceFile]) -> Vec<&str> {
+        files.iter().map(|f| f.path.as_str()).collect()
+    }
+
+    // ── Generation: all-missing cases ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn generates_license_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(paths(&files).contains(&"LICENSE"), "LICENSE must be generated");
+    }
+
+    #[tokio::test]
+    async fn generates_security_policy_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(
+            paths(&files).contains(&"SECURITY.md"),
+            "SECURITY.md must be generated"
+        );
+    }
+
+    #[tokio::test]
+    async fn generates_contributing_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(
+            paths(&files).contains(&"CONTRIBUTING.md"),
+            "CONTRIBUTING.md must be generated"
+        );
+    }
+
+    #[tokio::test]
+    async fn generates_changelog_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(
+            paths(&files).contains(&"CHANGELOG.md"),
+            "CHANGELOG.md must be generated"
+        );
+    }
+
+    #[tokio::test]
+    async fn generates_dependabot_yml_for_rust_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(
+            paths(&files).contains(&".github/dependabot.yml"),
+            ".github/dependabot.yml must be generated for Rust"
+        );
+    }
+
+    #[tokio::test]
+    async fn generates_clippy_toml_for_rust_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(
+            paths(&files).contains(&"clippy.toml"),
+            "clippy.toml must be generated for Rust"
+        );
+    }
+
+    #[tokio::test]
+    async fn generates_deny_toml_for_rust_when_missing() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        assert!(
+            paths(&files).contains(&"deny.toml"),
+            "deny.toml must be generated for Rust"
+        );
+    }
+
+    // ── Skip: all-present cases ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn no_files_generated_when_all_present() {
+        let files = run_action(all_present_report(), rust_languages()).await;
+        assert!(
+            files.is_empty(),
+            "no files should be generated when all governance files are present"
+        );
+    }
+
+    #[tokio::test]
+    async fn skips_license_when_already_present() {
+        let gov = GovernanceReport {
+            has_license: true,
+            ..Default::default()
+        };
+        let files = run_action(gov, rust_languages()).await;
+        assert!(
+            !paths(&files).contains(&"LICENSE"),
+            "LICENSE must NOT be generated when already present"
+        );
+    }
+
+    #[tokio::test]
+    async fn skips_security_policy_when_already_present() {
+        let gov = GovernanceReport {
+            has_security_policy: true,
+            ..Default::default()
+        };
+        let files = run_action(gov, rust_languages()).await;
+        assert!(!paths(&files).contains(&"SECURITY.md"));
+    }
+
+    #[tokio::test]
+    async fn skips_changelog_when_already_present() {
+        let gov = GovernanceReport {
+            has_changelog: true,
+            ..Default::default()
+        };
+        let files = run_action(gov, rust_languages()).await;
+        assert!(!paths(&files).contains(&"CHANGELOG.md"));
+    }
+
+    // ── Language-specific generation ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn generates_eslint_config_for_node() {
+        let files = run_action(all_missing_report(), node_languages()).await;
+        assert!(
+            paths(&files).contains(&"eslint.config.js"),
+            "eslint.config.js must be generated for Node"
+        );
+        // Node has no safety config → no mypy.ini or deny.toml
+        assert!(!paths(&files).contains(&"deny.toml"));
+        assert!(!paths(&files).contains(&"mypy.ini"));
+    }
+
+    #[tokio::test]
+    async fn generates_ruff_and_mypy_for_python() {
+        let files = run_action(all_missing_report(), python_languages()).await;
+        assert!(paths(&files).contains(&"ruff.toml"), "ruff.toml for Python");
+        assert!(paths(&files).contains(&"mypy.ini"), "mypy.ini for Python");
+    }
+
+    #[tokio::test]
+    async fn no_lint_or_safety_config_for_unknown_language() {
+        let files = run_action(all_missing_report(), unknown_languages()).await;
+        // Unknown language → no dependabot, no lint, no safety
+        assert!(!paths(&files).contains(&".github/dependabot.yml"));
+        assert!(
+            // no lang-specific configs should be generated
+            !files.iter().any(|f| f.path == "clippy.toml"
+                || f.path == "eslint.config.js"
+                || f.path == "ruff.toml"
+                || f.path == "deny.toml"
+                || f.path == "mypy.ini"),
+            "no lang-specific files should be generated for Unknown language"
+        );
+    }
+
+    #[tokio::test]
+    async fn dependabot_yml_contains_correct_ecosystem_for_rust() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        let dbot = files
+            .iter()
+            .find(|f| f.path == ".github/dependabot.yml")
+            .expect(".github/dependabot.yml must be in output");
+        assert!(
+            dbot.content.contains("cargo"),
+            "dependabot.yml for Rust must specify cargo ecosystem"
+        );
+    }
+
+    #[tokio::test]
+    async fn dependabot_yml_contains_correct_ecosystem_for_node() {
+        let files = run_action(all_missing_report(), node_languages()).await;
+        let dbot = files
+            .iter()
+            .find(|f| f.path == ".github/dependabot.yml")
+            .expect(".github/dependabot.yml must be in output");
+        assert!(dbot.content.contains("npm"));
+    }
+
+    // ── Template content correctness ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mit_license_contains_mit_identifier() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        let license = files
+            .iter()
+            .find(|f| f.path == "LICENSE")
+            .expect("LICENSE must be generated");
+        assert!(
+            license.content.contains("MIT License"),
+            "LICENSE must contain 'MIT License'"
+        );
+    }
+
+    #[tokio::test]
+    async fn security_policy_has_reporting_placeholder() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        let sec = files
+            .iter()
+            .find(|f| f.path == "SECURITY.md")
+            .expect("SECURITY.md must be generated");
+        assert!(
+            sec.content.contains("security@example.com"),
+            "SECURITY.md must contain the contact email placeholder"
+        );
+    }
+
+    #[tokio::test]
+    async fn dependabot_yml_is_valid_yaml() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        let dbot = files
+            .iter()
+            .find(|f| f.path == ".github/dependabot.yml")
+            .expect(".github/dependabot.yml must be generated");
+        // Minimal validity check: YAML top-level key must be "version"
+        assert!(
+            dbot.content.trim_start().starts_with("version:"),
+            "dependabot.yml must start with 'version:'"
+        );
+    }
+
+    #[tokio::test]
+    async fn clippy_toml_contains_msrv_key() {
+        let files = run_action(all_missing_report(), rust_languages()).await;
+        let clippy = files
+            .iter()
+            .find(|f| f.path == "clippy.toml")
+            .expect("clippy.toml must be generated for Rust");
+        assert!(
+            clippy.content.contains("msrv"),
+            "clippy.toml must contain an msrv key"
+        );
+    }
+
+    // ── Context storage ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn action_stores_result_in_context() {
+        let gov = all_missing_report();
+        let langs = rust_languages();
+        let ctx = ExecutionContext::new("test-ctx");
+        ctx.insert(CTX_GOVERNANCE_REPORT, gov).await;
+        ctx.insert(CTX_DETECTED_LANGUAGES, langs).await;
+        GenerateGovernanceFilesAction
+            .execute(&ctx, ())
+            .await
+            .expect("action must not fail");
+        let stored: Option<Vec<GovernanceFile>> = ctx.get(CTX_GOVERNANCE_FILES).await;
+        assert!(
+            stored.is_some(),
+            "action must store files in context under CTX_GOVERNANCE_FILES"
+        );
+        assert!(
+            !stored.unwrap().is_empty(),
+            "stored files must not be empty when all governance files are missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn action_returns_empty_vec_when_no_context_provided() {
+        // GovernanceReport and DetectedLanguages are both absent → use defaults
+        let ctx = ExecutionContext::new("test-empty");
+        let files = GenerateGovernanceFilesAction
+            .execute(&ctx, ())
+            .await
+            .expect("action must not fail even with empty context");
+        // Default GovernanceReport has all fields false → all files generated
+        // Default language is Unknown (via unwrap_or_default) → no lang-specific files
+        assert!(
+            files.iter().any(|f| f.path == "LICENSE"),
+            "LICENSE must still be generated when context is empty (all-missing defaults)"
+        );
+    }
+}

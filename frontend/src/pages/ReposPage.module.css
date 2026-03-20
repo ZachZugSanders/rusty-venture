@@ -1,0 +1,152 @@
+.root {
+  display: flex;
+  gap: 0;
+  height: calc(100vh - 52px - 64px);
+  overflow: hidden;
+}
+
+/* ── Table pane ── */
+.tablePane {
+  flex: 1;
+  overflow-y: auto;
+  transition: flex 0.2s ease;
+}
+.tablePaneNarrow { flex: 0 0 320px; }
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.heading { font-size: 20px; font-weight: 600; }
+
+.refreshBtn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  font-size: 13px;
+  border-radius: var(--radius);
+}
+.refreshBtn:hover { color: var(--text); border-color: var(--text-muted); }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+
+.repoRow { cursor: pointer; }
+.repoRow:hover td { background: var(--surface); }
+.repoRowActive td { background: #1a2333; }
+
+.repoCell { max-width: 240px; }
+.repoUrl { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.chevron { color: var(--text-muted); text-align: right; font-size: 11px; }
+.muted { color: var(--text-muted); }
+.errorText { color: var(--red); }
+
+/* ── Badges ── */
+.badge { font-weight: 700; font-size: 12px; }
+.green { color: var(--green); }
+.yellow { color: var(--yellow); }
+.red { color: var(--red); }
+
+/* ── Detail pane ── */
+.detailPane {
+  flex: 1;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.panel { display: flex; flex-direction: column; height: 100%; }
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 24px 0;
+  gap: 16px;
+  flex-shrink: 0;
+}
+.panelTitle { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.repoName {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scanCount { font-size: 12px; color: var(--text-muted); }
+
+.closeBtn {
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+}
+.closeBtn:hover { color: var(--text); background: var(--border); }
+
+.panelTabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 24px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panelTab {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.panelTab:hover { color: var(--text); }
+.panelTabActive { color: var(--text); border-bottom-color: var(--accent); }
+
+.panelBody { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+/* ── History tab ── */
+.historyTab { overflow-x: auto; }
+
+.miniTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.miniTable th {
+  text-align: left;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.miniTable td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+
+.scanRow { cursor: pointer; }
+.scanRow:hover td { background: var(--surface); }
+.scanRowActive td { background: #1a2333; }
+
+.expandedCell {
+  padding: 0 !important;
+  background: var(--bg);
+}
+
+.expandedCell > * { padding: 16px; }
