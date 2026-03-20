@@ -9,3 +9,7 @@
 [ 7657284ms] [ERROR] Failed to load resource: net::ERR_FAILED @ http://localhost:8080/scans?limit=50:0
 [ 7828469ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/src/components/GradeBadge.module.css?t=1773791002565:0
 [ 7828469ms] [ERROR] [hmr] Failed to reload /src/components/GradeBadge.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:3000/node_modules/.vite/deps/chunk-LJ4HJGBY.js?v=7ab0f0fe:18166
+[186383968ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/src/views/DecisionGraphView.tsx?t=1773969558046:0
+[186383969ms] [ERROR] [hmr] Failed to reload /src/views/DecisionGraphView.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:3000/node_modules/.vite/deps/chunk-LJ4HJGBY.js?v=7ab0f0fe:18166
+[195511080ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/src/views/DecisionGraphView.tsx?t=1773978685170:0
+[195511086ms] [ERROR] [hmr] Failed to reload /src/views/DecisionGraphView.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:3000/node_modules/.vite/deps/chunk-LJ4HJGBY.js?v=7ab0f0fe:18166

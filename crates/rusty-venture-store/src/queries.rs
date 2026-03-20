@@ -3,7 +3,10 @@ use chrono::Utc;
 use sqlx::Row;
 use uuid::Uuid;
 
-use rusty_venture_actions::repo::{audit_files::AuditReport, maturity::MaturityScore, RepoAnalysisResult};
+use rusty_venture_actions::{
+    graph::{DecisionGraph, NodeSizeConfig},
+    repo::{audit_files::AuditReport, maturity::MaturityScore, RepoAnalysisResult},
+};
 
 use crate::db::Pool;
 
@@ -160,16 +163,24 @@ pub async fn insert_scan(
         }
     }
 
-    // Store the full MaturityScore JSON as the decision-graph artifact.
+    // Store the full MaturityScore JSON AND the pre-computed DecisionGraph.
     let graph_id = Uuid::new_v4().to_string();
+    let graph_payload = serde_json::to_string(
+        &DecisionGraph::from_maturity_full(
+            maturity,
+            Some(result.report.risk_score),
+            NodeSizeConfig::default(),
+        )
+    ).context("serialise DecisionGraph payload")?;
     sqlx::query(
-        "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at) \
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at, graph_payload) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
     )
     .bind(&graph_id)
     .bind(scan_id)
     .bind(&raw_maturity)
     .bind(&now)
+    .bind(&graph_payload)
     .execute(&mut *tx)
     .await
     .context("insert decision_graph in insert_scan")?;
@@ -365,21 +376,27 @@ pub async fn insert_signal_evidence(
 }
 
 /// Store the decision-graph artifact for a scan.
+///
+/// `graph_json` is the legacy raw `MaturityScore` JSON for backwards-compat.
+/// `graph_payload` is the pre-computed `DecisionGraph` JSON introduced in
+/// migration 003; pass `None` when inserting from old code paths.
 pub async fn insert_decision_graph(
     pool: &Pool,
     id: &str,
     scan_id: &str,
     graph_json: &str,
     created_at: &str,
+    graph_payload: Option<&str>,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at) \
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at, graph_payload) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
     )
     .bind(id)
     .bind(scan_id)
     .bind(graph_json)
     .bind(created_at)
+    .bind(graph_payload)
     .execute(pool)
     .await
     .context("insert decision_graph")?;
@@ -392,7 +409,7 @@ pub async fn get_decision_graph_for_scan(
     scan_id: &str,
 ) -> Result<Option<crate::models::DecisionGraphRow>> {
     let row = sqlx::query_as::<_, crate::models::DecisionGraphRow>(
-        "SELECT id, scan_id, graph_json, created_at \
+        "SELECT id, scan_id, graph_json, created_at, graph_payload \
          FROM decision_graphs WHERE scan_id = ?",
     )
     .bind(scan_id)

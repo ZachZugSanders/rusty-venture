@@ -130,10 +130,13 @@ pub struct DecisionGraphRow {
     pub id: String,
     /// FK → scans.id
     pub scan_id: String,
-    /// Full graph serialised as JSON.
+    /// Legacy raw MaturityScore JSON (kept for backwards-compat).
     pub graph_json: String,
     /// ISO 8601 timestamp.
     pub created_at: String,
+    /// Full `DecisionGraph` JSON pre-computed at scan time (migration 003+).
+    /// When present, the server uses this directly instead of rebuilding.
+    pub graph_payload: Option<String>,
 }
 
 // ── Overview / trend view models ──────────────────────────────────────────────

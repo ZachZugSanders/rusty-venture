@@ -158,16 +158,27 @@ def _trends_stub(repo_id: str = "repo-00") -> list:
 
 
 def _decision_graph_stub(scan_id: str = "scan-diamond-0") -> dict:
-    """Return a DecisionGraph-shaped payload for mock API responses."""
+    """Return a DecisionGraph-shaped payload for mock API responses.
+
+    Schema mirrors the Phase-3 Rust `DecisionGraph` struct:
+    nodes have px/py/pz/radius and semantic metadata; edges carry weight;
+    the graph carries a NodeSizeConfig under the ``config`` key.
+    """
     return {
         "nodes": [
             {
                 "id": "root",
                 "label": "Composite 92",
                 "kind": "root",
-                "x": 0.0,
-                "y": 92.0,
-                "z": 0.0,
+                "px": 0.0,
+                "py": 0.0,
+                "pz": 0.0,
+                "radius": 0.78,
+                "score": 92.0,
+                "weight": 1.0,
+                "max_points": 0,
+                "signal_count": 0,
+                "has_detail": False,
                 "passed": True,
                 "highlight": False,
             },
@@ -175,9 +186,15 @@ def _decision_graph_stub(scan_id: str = "scan-diamond-0") -> dict:
                 "id": "dim:Security",
                 "label": "Security",
                 "kind": "dimension",
-                "x": 0.25,
-                "y": 95.0,
-                "z": 0.0,
+                "px": 5.0,
+                "py": 0.0,
+                "pz": 0.0,
+                "radius": 0.60,
+                "score": 95.0,
+                "weight": 0.30,
+                "max_points": 0,
+                "signal_count": 2,
+                "has_detail": False,
                 "passed": True,
                 "highlight": False,
             },
@@ -185,9 +202,15 @@ def _decision_graph_stub(scan_id: str = "scan-diamond-0") -> dict:
                 "id": "sig:Security:no_critical_cves",
                 "label": "No critical CVEs",
                 "kind": "signal",
-                "x": 0.25,
-                "y": 40.0,
-                "z": 40.0,
+                "px": 6.8,
+                "py": 1.5,
+                "pz": 0.0,
+                "radius": 0.25,
+                "score": 40.0,
+                "weight": 0.15,
+                "max_points": 40,
+                "signal_count": 0,
+                "has_detail": False,
                 "passed": True,
                 "highlight": False,
             },
@@ -195,18 +218,43 @@ def _decision_graph_stub(scan_id: str = "scan-diamond-0") -> dict:
                 "id": "sig:Security:has_security_policy",
                 "label": "Has SECURITY.md",
                 "kind": "signal",
-                "x": 0.25,
-                "y": 0.0,
-                "z": 20.0,
+                "px": 6.8,
+                "py": -1.5,
+                "pz": 0.0,
+                "radius": 0.20,
+                "score": 0.0,
+                "weight": 0.15,
+                "max_points": 15,
+                "signal_count": 0,
+                "has_detail": True,
                 "passed": False,
                 "highlight": True,
             },
         ],
         "edges": [
-            {"from": "root", "to": "dim:Security"},
-            {"from": "dim:Security", "to": "sig:Security:no_critical_cves"},
-            {"from": "dim:Security", "to": "sig:Security:has_security_policy"},
+            {"from": "root", "to": "dim:Security", "weight": 0.30},
+            {
+                "from": "dim:Security",
+                "to": "sig:Security:no_critical_cves",
+                "weight": 0.15,
+            },
+            {
+                "from": "dim:Security",
+                "to": "sig:Security:has_security_policy",
+                "weight": 0.15,
+            },
         ],
+        "config": {
+            "orbit_l1": 5.0,
+            "orbit_l2": 2.0,
+            "root_base_radius": 0.50,
+            "dim_base_radius": 0.28,
+            "sig_base_radius": 0.12,
+            "score_scale": 0.003,
+            "sig_points_scale": 0.008,
+            "dim_signal_scale": 0.02,
+            "sig_detail_boost": 0.08,
+        },
     }
 
 

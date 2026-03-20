@@ -336,3 +336,65 @@ async fn run_governance_script(
         go_version_declared: yes("GO_VERSION"),
     })
 }
+
+// ── Docker-free local governance check ───────────────────────────────────────
+
+/// Check which governance files are present in a local repository directory.
+/// Used by the `--no-container` code path.
+///
+/// Performs only filename/directory existence checks; does not grep file
+/// contents, so sub-fields like `rust_msrv_declared` remain `false`.
+pub fn detect_governance_local(path: &std::path::Path) -> GovernanceReport {
+    let has = |name: &str| path.join(name).exists();
+    let has_any = |names: &[&str]| names.iter().any(|n| has(n));
+    let has_dir = |name: &str| path.join(name).is_dir();
+
+    let has_license = has_any(&[
+        "LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE",
+        "LICENSE-MIT", "LICENSE-APACHE", "COPYING",
+    ]);
+
+    GovernanceReport {
+        has_license,
+        license_all_rights_reserved: !has_license,
+        has_readme: has_any(&["README.md", "README.txt", "README.rst", "README"]),
+        has_changelog: has_any(&["CHANGELOG.md", "CHANGELOG.txt", "CHANGES.md", "HISTORY.md"]),
+        has_contributing: has_any(&["CONTRIBUTING.md", "CONTRIBUTING.txt", "CONTRIBUTING.rst"]),
+        has_security_policy: has_any(&[
+            "SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md", "SECURITY.txt",
+        ]),
+        has_code_of_conduct: has_any(&["CODE_OF_CONDUCT.md", "CODE_OF_CONDUCT.rst"]),
+        has_ci_config: has_dir(".github/workflows")
+            || has(".travis.yml")
+            || has(".circleci/config.yml")
+            || has("Jenkinsfile")
+            || has(".gitlab-ci.yml")
+            || has("bitbucket-pipelines.yml"),
+        has_dependabot: has(".github/dependabot.yml") || has(".github/dependabot.yaml"),
+        has_renovate: has("renovate.json") || has("renovate.json5") || has(".renovaterc"),
+        has_any_lock_file: has_any(&[
+            "Cargo.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+            "go.sum", "poetry.lock", "uv.lock", "Pipfile.lock", "Gemfile.lock",
+            "composer.lock",
+        ]),
+        has_lint_config: has_any(&[
+            "clippy.toml", ".clippy.toml",
+            ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", "eslint.config.js",
+            "ruff.toml", ".ruff.toml", ".flake8",
+            ".golangci.yml", ".golangci.yaml",
+            "pylintrc", ".pylintrc",
+            "biome.json", "oxlintrc.json",
+        ]),
+        has_pre_commit: has(".pre-commit-config.yaml") || has_dir(".husky") || has("lefthook.yml"),
+        has_safety_config: has_any(&["deny.toml", ".cargo/audit.toml", "mypy.ini", "tsconfig.json"]),
+        has_test_files: has_dir("tests")
+            || has_dir("test")
+            || has_dir("spec")
+            || has_dir("__tests__"),
+        // Content-grep signals are not feasible without reading files — leave false.
+        rust_msrv_declared: false,
+        node_engine_declared: false,
+        python_requires_declared: false,
+        go_version_declared: false,
+    }
+}

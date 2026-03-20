@@ -175,3 +175,32 @@ impl Action for DetectLanguageAction {
         Ok(detected)
     }
 }
+
+// ── Docker-free local detection ───────────────────────────────────────────────
+
+/// Detect the primary programming language by checking well-known marker files
+/// directly on the local filesystem. Used by the `--no-container` code path.
+///
+/// Returns the first matching language in priority order. For a full scored
+/// multi-language result use the Docker-based `DetectLanguageAction` instead.
+pub fn detect_language_local(path: &std::path::Path) -> Language {
+    let markers: &[(&str, Language)] = &[
+        ("Cargo.toml", Language::Rust),
+        ("go.mod", Language::Go),
+        ("pyproject.toml", Language::Python),
+        ("requirements.txt", Language::Python),
+        ("package.json", Language::Node),
+        ("pom.xml", Language::Java),
+        ("build.gradle", Language::Java),
+        ("build.gradle.kts", Language::Kotlin),
+        ("Gemfile", Language::Ruby),
+        ("composer.json", Language::PHP),
+        ("Package.swift", Language::Swift),
+    ];
+    for (file, lang) in markers {
+        if path.join(file).exists() {
+            return lang.clone();
+        }
+    }
+    Language::Unknown
+}

@@ -61,6 +61,12 @@ struct AnalyzeArgs {
     /// Set to "" to skip persistence. Defaults to sqlite://rusty-venture.db.
     #[arg(long, env = "DATABASE_URL", default_value = "sqlite://rusty-venture.db")]
     database_url: String,
+
+    /// Skip Docker container spin-up and analyse using only local filesystem
+    /// reads and the LLM. Requires `git` to be available on PATH.
+    /// Dependency scanning and file-audit checks are skipped in this mode.
+    #[arg(long, short = 'n')]
+    no_container: bool,
 }
 
 #[derive(Parser)]
@@ -306,6 +312,7 @@ async fn run_analyze(args: AnalyzeArgs) -> Result<()> {
         branch: args.branch,
         claude_api_key: args.api_key,
         docker_socket: None,
+        skip_container: args.no_container,
     })
     .await?;
 

@@ -109,7 +109,7 @@ The project reads environment variables (optionally from `.env`):
 
 - `ANTHROPIC_API_KEY` (**required** for analyze flow)
 - `DATABASE_URL` (optional, default: `sqlite://rusty-venture.db`)
-- `LISTEN_ADDR` (optional server bind, default: `0.0.0.0:8080`)
+- `LISTEN_ADDR` (optional server bind, default: `0.0.0.0:3002`)
 - `RUST_LOG` (optional tracing filter, e.g. `info` / `debug`)
 
 Example `.env`:
@@ -117,7 +117,7 @@ Example `.env`:
 ```env
 ANTHROPIC_API_KEY=your_key_here
 DATABASE_URL=sqlite://rusty-venture.db
-LISTEN_ADDR=0.0.0.0:8080
+LISTEN_ADDR=0.0.0.0:3002
 RUST_LOG=info
 ```
 
@@ -200,7 +200,7 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-The Vite dev server proxies `/analyze`, `/repos`, `/scans`, and `/health` to `http://localhost:8080`.
+The Vite dev server proxies `/analyze`, `/repos`, `/scans`, and `/health` to `http://localhost:3002`.
 
 ---
 

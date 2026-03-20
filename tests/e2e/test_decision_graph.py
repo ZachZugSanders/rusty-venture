@@ -175,3 +175,29 @@ class TestDecisionGraphInspector:
         expect(
             inspector.locator('[data-testid="inspector-highlight-badge"]')
         ).to_be_visible()
+
+
+class TestDecisionGraphRootNode:
+    """Phase 6 coverage: assert the root node is always present in the graph."""
+
+    def test_root_node_present_in_node_list(
+        self, page: Page, frontend_url: str
+    ) -> None:
+        """The mock graph always contains a root node; it must appear in the list."""
+        go_to_graph(page, frontend_url)
+        root_item = page.locator('[data-testid="node-list-item"][data-node-id="root"]')
+        expect(root_item).to_be_visible()
+
+    def test_selecting_root_node_updates_inspector(
+        self, page: Page, frontend_url: str
+    ) -> None:
+        """Clicking the root node list item updates the inspector with its id."""
+        go_to_graph(page, frontend_url)
+        page.locator('[data-testid="node-list-item"][data-node-id="root"]').click()
+        inspector = page.locator('[data-testid="node-inspector"]')
+        expect(
+            inspector.locator('[data-testid="inspector-placeholder"]')
+        ).not_to_be_visible()
+        expect(inspector.locator('[data-testid="inspector-node-id"]')).to_have_text(
+            "root"
+        )

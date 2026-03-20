@@ -182,6 +182,7 @@ function ResultView({ result, repoUrl }: { result: AnalyzeResult; repoUrl: strin
 export default function AnalyzeView() {
     const [repoUrl, setRepoUrl] = useState('')
     const [branch, setBranch] = useState('')
+    const [noContainer, setNoContainer] = useState(false)
     const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
     const [result, setResult] = useState<AnalyzeResult | null>(null)
     const [error, setError] = useState<string | null>(null)
@@ -194,9 +195,32 @@ export default function AnalyzeView() {
             const res = await fetch('/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ repo_url: repoUrl, branch: branch || undefined }),
+                body: JSON.stringify({
+                    repo_url: repoUrl,
+                    branch: branch || undefined,
+                    no_container: noContainer,
+                }),
             })
-            const json = await res.json()
+            // Guard against empty or non-JSON bodies (e.g. proxy 502 when
+            // the server is down, or a connection drop mid-response).
+            const text = await res.text()
+            if (!text) {
+                setError(
+                    res.ok
+                        ? 'Server returned an empty response.'
+                        : `Server error ${res.status} — is rusty-venture-server running?`,
+                )
+                setStatus('error')
+                return
+            }
+            let json: { success: boolean; data?: AnalyzeResult; error?: string }
+            try {
+                json = JSON.parse(text)
+            } catch {
+                setError(`Unexpected server response (HTTP ${res.status}): ${text.slice(0, 200)}`)
+                setStatus('error')
+                return
+            }
             if (json.success) {
                 setResult(json.data as AnalyzeResult)
                 setStatus('done')
@@ -205,7 +229,7 @@ export default function AnalyzeView() {
                 setStatus('error')
             }
         } catch (err) {
-            setError(String(err))
+            setError(`Network error — is rusty-venture-server running? (${String(err)})`)
             setStatus('error')
         }
     }
@@ -246,6 +270,18 @@ export default function AnalyzeView() {
                                 className={styles.input}
                                 disabled={status === 'loading'}
                             />
+                        </label>
+                        <label className={styles.fieldGroup} style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
+                            <input
+                                type="checkbox"
+                                id="no-container"
+                                checked={noContainer}
+                                onChange={e => setNoContainer(e.target.checked)}
+                                disabled={status === 'loading'}
+                            />
+                            <span className={styles.fieldLabel} style={{ margin: 0 }}>
+                                Skip Docker (no-container mode)
+                            </span>
                         </label>
                         <button
                             type="submit"

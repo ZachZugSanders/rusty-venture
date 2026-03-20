@@ -454,7 +454,7 @@ mod store {
         let now = Utc::now().to_rfc3339();
         let graph_json = r#"{"nodes":[],"edges":[]}"#;
 
-        insert_decision_graph(&pool, &graph_id, &scan_id, graph_json, &now)
+        insert_decision_graph(&pool, &graph_id, &scan_id, graph_json, &now, None)
             .await
             .expect("insert_decision_graph");
 
@@ -547,6 +547,7 @@ mod store {
             &scan_id,
             r#"{"nodes":["root"],"edges":[]}"#,
             &now,
+            None,
         )
         .await
         .unwrap();
@@ -1383,6 +1384,7 @@ mod serialization {
             scan_id: "scan-1".to_string(),
             graph_json: r#"{"nodes":["root"],"edges":[]}"#.to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
+            graph_payload: None,
         };
         let json = serde_json::to_string(&original).expect("serialize DecisionGraphRow");
         let back: DecisionGraphRow = serde_json::from_str(&json).unwrap();

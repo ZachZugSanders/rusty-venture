@@ -12,4 +12,4 @@ pub use repo::{
     GovernanceCheckAction, GovernanceReport, MaturityDimension, MaturityGrade, MaturityScore,
     RepoAnalysisRequest, RepoAnalysisResult,
 };
-pub use graph::{DecisionGraph, GraphEdge, GraphNode};
+pub use graph::{DecisionGraph, GraphEdge, GraphNode, NodeSizeConfig};

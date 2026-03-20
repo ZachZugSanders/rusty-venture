@@ -11,9 +11,9 @@ pub mod scaffold;
 pub use analyze_deps::{AnalyzeDepsAction, DependencyReport, CTX_DEPENDENCY_REPORT};
 pub use audit_files::{AuditCommittedFilesAction, AuditReport, AuditViolation, CTX_AUDIT_REPORT};
 pub use clone::{CloneRepoAction, CloneResult, CTX_REPO_LOCAL_PATH, CTX_REPO_URL};
-pub use detect_language::{DetectLanguageAction, DetectedLanguages, Language, CTX_DETECTED_LANGUAGES};
+pub use detect_language::{detect_language_local, DetectLanguageAction, DetectedLanguages, Language, CTX_DETECTED_LANGUAGES};
 pub use find_dockerfiles::{DockerfileReport, FindDockerfilesAction, CTX_DOCKERFILE_REPORT};
-pub use governance::{GovernanceCheckAction, GovernanceReport, CTX_GOVERNANCE_REPORT};
+pub use governance::{detect_governance_local, GovernanceCheckAction, GovernanceReport, CTX_GOVERNANCE_REPORT};
 pub use maturity::{compute_maturity, MaturityDimension, MaturityGrade, MaturityScore, CTX_MATURITY_SCORE};
 pub use report::{FinalReport, GenerateReportAction, CTX_FINAL_REPORT};
 pub use scaffold::{
@@ -46,6 +46,10 @@ pub struct RepoAnalysisRequest {
     pub claude_api_key: String,
     /// Docker socket path. `None` uses the platform default.
     pub docker_socket: Option<String>,
+    /// When `true`, skip container spin-up and analyse using only local
+    /// filesystem reads and the LLM. Requires `git` to be installed on the
+    /// host. Dependency/audit analysis is skipped in this mode.
+    pub skip_container: bool,
 }
 
 /// The result of a complete repository analysis run.
@@ -160,11 +164,95 @@ pub fn repo_analysis_workflow<C: LlmConnector + 'static>(
         .build()
 }
 
+/// The no-container analysis path.
+///
+/// Clones the repository using the host's `git` binary, performs all
+/// analysis purely via filesystem reads, and uses the LLM for the final
+/// report. Dependency scanning and file-audit checks (which require an
+/// isolated container) are skipped.
+async fn run_repo_analysis_no_container(
+    request: RepoAnalysisRequest,
+) -> anyhow::Result<RepoAnalysisResult> {
+    let start = std::time::Instant::now();
+
+    // ── 1. Clone into a temp directory ───────────────────────────────────────
+    let tmp_dir = tempfile::tempdir().context("create temp dir for no-container clone")?;
+    let repo_path = tmp_dir.path().to_path_buf();
+
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["clone", "--depth", "1"]);
+    if let Some(ref branch) = request.branch {
+        cmd.args(["-b", branch.as_str()]);
+    }
+    cmd.arg(&request.repo_url).arg(&repo_path);
+
+    let status = cmd.status().context("git clone failed")?;
+    anyhow::ensure!(status.success(), "git clone exited with status {status}");
+
+    // ── 2. Local analysis ────────────────────────────────────────────────────
+    let lang = detect_language_local(&repo_path);
+    let governance = detect_governance_local(&repo_path);
+
+    let languages = DetectedLanguages {
+        secondary: vec![],
+        scores: vec![(lang.clone(), 10)],
+        primary: lang,
+    };
+
+    // ── 3. Build execution context and run the LLM report step ──────────────
+    let ctx = ExecutionContext::new("repo-analysis-no-container");
+    ctx.insert(CTX_DETECTED_LANGUAGES, languages.clone()).await;
+    ctx.insert(CTX_GOVERNANCE_REPORT, governance.clone()).await;
+    ctx.insert(clone::CTX_REPO_URL, request.repo_url.clone()).await;
+
+    let connector = Arc::new(rusty_venture_llm::ClaudeConnector::new(&request.claude_api_key));
+    let report_action = report::GenerateReportAction::new(connector);
+
+    rusty_venture_core::action::Action::execute(&report_action, &ctx, ())
+        .await
+        .map_err(|e| anyhow::anyhow!("Report generation failed: {e}"))?;
+
+    let report: FinalReport = ctx
+        .require::<FinalReport>(CTX_FINAL_REPORT)
+        .await
+        .context("Final report was not generated")?;
+
+    // ── 4. Compute maturity from available signals ───────────────────────────
+    let deps = DependencyReport::default();
+    let dockerfiles = DockerfileReport::default();
+    let audit = AuditReport::default();
+
+    let maturity = compute_maturity(
+        &report,
+        &deps,
+        &dockerfiles,
+        &audit,
+        &languages.primary,
+        &governance,
+    );
+
+    ctx.insert(CTX_MATURITY_SCORE, maturity.clone()).await;
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    Ok(RepoAnalysisResult {
+        run_id: ctx.run_id.to_string(),
+        repo_url: request.repo_url,
+        report,
+        maturity,
+        duration_ms,
+    })
+}
+
 /// Run the full repository analysis workflow end-to-end.
 /// This is the shared entry point used by both the CLI and HTTP server.
 pub async fn run_repo_analysis(
     request: RepoAnalysisRequest,
 ) -> anyhow::Result<RepoAnalysisResult> {
+    if request.skip_container {
+        return run_repo_analysis_no_container(request).await;
+    }
+
     let start = std::time::Instant::now();
 
     let docker = Arc::new(

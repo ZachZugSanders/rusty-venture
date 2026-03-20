@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
 };
 use rusty_venture_actions::repo::{run_repo_analysis, maturity::MaturityScore, AuditReport, RepoAnalysisRequest};
-use rusty_venture_actions::DecisionGraph;
+use rusty_venture_actions::{DecisionGraph, NodeSizeConfig};
 use rusty_venture_store::{get_decision_graph_for_scan, get_scan, insert_scan, list_repos, list_scans, list_scans_for_repo, open_pool, get_repo_overview, get_repo_trends, Pool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -26,6 +26,9 @@ struct AppState {
 struct AnalyzeRequest {
     repo_url: String,
     branch: Option<String>,
+    /// When `true`, skip Docker and analyse using local `git` + LLM only.
+    #[serde(default)]
+    no_container: bool,
 }
 
 /// Query params for GET /scans.
@@ -110,7 +113,7 @@ async fn main() {
 
     let app = build_app(state);
 
-    let addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+    let addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:3002".to_string());
     info!(addr = %addr, "rusty-venture-server starting");
 
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -126,7 +129,7 @@ async fn scan_decision_graph_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // 1. Look up the stored graph blob (raw MaturityScore JSON).
+    // 1. Look up the stored graph row.
     let row = match get_decision_graph_for_scan(&state.db, &id).await {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -143,21 +146,51 @@ async fn scan_decision_graph_handler(
         }
     };
 
-    // 2. Deserialise the blob as a MaturityScore.
-    let maturity: MaturityScore = match serde_json::from_str(&row.graph_json) {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(scan_id = %id, error = %e, "Failed to parse decision graph blob");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ApiError::new(format!("Corrupted decision-graph blob: {e}")),
-            )
-                .into_response();
+    // 2. Prefer the pre-computed DecisionGraph payload (stored since migration 003).
+    //    For older rows fall back to rebuilding from the raw MaturityScore JSON.
+    let graph: DecisionGraph = if let Some(ref payload) = row.graph_payload {
+        match serde_json::from_str(payload) {
+            Ok(g) => g,
+            Err(e) => {
+                warn!(scan_id = %id, error = %e, "graph_payload parse failed; rebuilding from legacy");
+                // Fall through to legacy path below.
+                let risk_score: Option<u8> = get_scan(&state.db, &id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|s| s.risk_score);
+                match serde_json::from_str::<MaturityScore>(&row.graph_json) {
+                    Ok(m) => DecisionGraph::from_maturity_full(&m, risk_score, NodeSizeConfig::default()),
+                    Err(e2) => {
+                        warn!(scan_id = %id, error = %e2, "legacy graph_json parse failed");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            ApiError::new(format!("Corrupted decision-graph data: {e2}")),
+                        )
+                            .into_response();
+                    }
+                }
+            }
+        }
+    } else {
+        // Legacy path: row predates migration 003.
+        let risk_score: Option<u8> = get_scan(&state.db, &id)
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.risk_score);
+        match serde_json::from_str::<MaturityScore>(&row.graph_json) {
+            Ok(m) => DecisionGraph::from_maturity_full(&m, risk_score, NodeSizeConfig::default()),
+            Err(e) => {
+                warn!(scan_id = %id, error = %e, "Failed to parse legacy decision graph blob");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ApiError::new(format!("Corrupted decision-graph blob: {e}")),
+                )
+                    .into_response();
+            }
         }
     };
-
-    // 3. Transform to the typed graph payload.
-    let graph = DecisionGraph::from_maturity(&maturity);
 
     (StatusCode::OK, Json(ApiResponse { success: true, data: graph })).into_response()
 }
@@ -177,6 +210,7 @@ async fn analyze_handler(
         branch: body.branch,
         claude_api_key: (*state.anthropic_api_key).clone(),
         docker_socket: None,
+        skip_container: body.no_container,
     })
     .await
     {
@@ -839,6 +873,86 @@ mod tests {
         assert!(
             json["version"].as_str().is_some(),
             "health response must include a 'version' field"
+        );
+    }
+
+    // ── GET /scans/:id/decision-graph — config.orbit_l1 validation ───────────
+
+    #[tokio::test]
+    async fn decision_graph_config_has_default_orbit_l1() {
+        use rusty_venture_actions::repo::maturity::{
+            DimensionScore, MaturityDimension, MaturityGrade, MaturityScore, MaturitySignal,
+        };
+        let pool = test_pool().await;
+        let now = "2026-04-01T00:00:00Z";
+
+        sqlx::query("INSERT INTO repos (id, url, first_seen) VALUES ('r-cfg', 'https://github.com/test/cfg', ?1)")
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let maturity = MaturityScore {
+            composite: 72,
+            grade: MaturityGrade::Gold,
+            dimensions: vec![DimensionScore {
+                dimension: MaturityDimension::Security,
+                score: 80,
+                signals: vec![MaturitySignal {
+                    name: "no_critical_cves".to_string(),
+                    description: "No critical CVEs".to_string(),
+                    passed: true,
+                    points: 40,
+                    detail: None,
+                }],
+            }],
+        };
+        let raw_maturity = serde_json::to_string(&maturity).unwrap();
+
+        sqlx::query(
+            "INSERT INTO scans (id, repo_id, scanned_at, duration_ms, risk_score, \
+             composite_maturity, maturity_grade, raw_report, raw_maturity) \
+             VALUES ('scan-cfg-1', 'r-cfg', ?1, 10, 0, 72, 'GOLD', '{}', ?2)",
+        )
+        .bind(now)
+        .bind(&raw_maturity)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let dg_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at) VALUES (?1, 'scan-cfg-1', ?2, ?3)",
+        )
+        .bind(&dg_id)
+        .bind(&raw_maturity)
+        .bind(now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let app = build_app(test_state(pool));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/scans/scan-cfg-1/decision-graph")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response.into_body()).await;
+        assert_eq!(json["success"], true);
+
+        let expected = NodeSizeConfig::default().orbit_l1 as f64;
+        let actual = json["data"]["config"]["orbit_l1"]
+            .as_f64()
+            .expect("config.orbit_l1 must be a number");
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "config.orbit_l1 must equal NodeSizeConfig::default().orbit_l1 ({expected}), got {actual}"
         );
     }
 }

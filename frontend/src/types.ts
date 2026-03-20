@@ -58,13 +58,52 @@ export interface ApiResponse<T> {
 
 // ── Decision Graph ───────────────────────────────────────────────────────────
 
+/**
+ * Static configuration controlling the 3D radial layout and visual sphere
+ * sizes. Mirrored from Rust `NodeSizeConfig` in `rusty-venture-actions`.
+ */
+export interface NodeSizeConfig {
+    /** Root → dimension orbital radius. */
+    orbit_l1: number
+    /** Dimension → signal orbital radius. */
+    orbit_l2: number
+    /** Base sphere radius for the root node. */
+    root_base_radius: number
+    /** Base sphere radius for dimension nodes. */
+    dim_base_radius: number
+    /** Base sphere radius for signal nodes. */
+    sig_base_radius: number
+    /** Score-driven size multiplier for root and dimension radii. */
+    score_scale: number
+    /** Points-driven size multiplier for signal radii. */
+    sig_points_scale: number
+    /** Signal-count boost for dimension radius (more children = larger hub). */
+    dim_signal_scale: number
+    /** Extra radius boost for signal nodes that carry an actionable detail string. */
+    sig_detail_boost: number
+}
+
 export interface GraphNode {
     id: string
     label: string
     kind: 'root' | 'dimension' | 'signal'
-    x: number
-    y: number
-    z: number
+    // Pre-computed 3D world-space position (hierarchical radial layout)
+    px: number
+    py: number
+    pz: number
+    /** Pre-computed visual sphere radius from NodeSizeConfig. */
+    radius: number
+    // Semantic metadata
+    /** Earned value: composite / dim-score / signal points (0 if failed). */
+    score: number
+    /** Dimension weight 0–1; 1.0 for root. */
+    weight: number
+    /** Maximum points this signal can contribute; 0 for root/dim nodes. */
+    max_points: number
+    /** Number of direct signal children; 0 for root/signal nodes. */
+    signal_count: number
+    /** Whether this signal node carries an actionable detail string. */
+    has_detail: boolean
     passed: boolean
     highlight: boolean
 }
@@ -72,10 +111,13 @@ export interface GraphNode {
 export interface GraphEdge {
     from: string
     to: string
+    /** Visual weight for edge rendering; root→dim = dim weight, dim→sig = half dim weight. */
+    weight: number
 }
 
 export interface DecisionGraph {
     nodes: GraphNode[]
     edges: GraphEdge[]
+    config: NodeSizeConfig
 }
 
