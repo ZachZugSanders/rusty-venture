@@ -1,0 +1,149 @@
+/* ── Table ─────────────────────────────────────────────────────────────────── */
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.845rem;
+}
+
+.table thead th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.row {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+}
+
+.row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.row td {
+    padding: 9px 12px;
+    vertical-align: middle;
+}
+
+.scoreCell {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.mutedCell {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+/* ── Empty state ───────────────────────────────────────────────────────────── */
+
+.emptyState {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    gap: 8px;
+    text-align: center;
+}
+
+.emptyMsg {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.emptyHint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────────── */
+
+.footerStatus {
+    flex: 1;
+    font-size: 0.845rem;
+}
+
+.footerActions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.rescanChecking {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+}
+
+.rescanSpinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.footerUpToDate {
+    color: #3cb464;
+    font-weight: 500;
+}
+
+.footerError {
+    color: #dc4040;
+}
+
+.rescanBtn {
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.845rem;
+    font-weight: 600;
+    padding: 8px 18px;
+    transition: opacity 0.15s;
+}
+
+.rescanBtn:hover:not(:disabled) {
+    opacity: 0.88;
+}
+
+.rescanBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.cancelBtn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.845rem;
+    font-weight: 500;
+    padding: 8px 16px;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.cancelBtn:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}

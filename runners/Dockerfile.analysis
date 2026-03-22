@@ -1,0 +1,20 @@
+# Runner image for the analysis phase of repo analysis.
+# Pre-built so there is zero pull/install time when the backend spawns this container.
+# Network is DISABLED at container runtime — all tools must be baked in here.
+#
+# Language-specific runner images (node, python, rust, go) should extend this base
+# after DetectLanguageAction has determined the repo's stack.
+FROM debian:bookworm-slim
+
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends \
+       # File analysis: find, wc, grep, sed, sort, uniq, head
+       coreutils \
+       findutils \
+       grep \
+       sed \
+       # Manifest parsing
+       ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

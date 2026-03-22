@@ -3,15 +3,15 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rusty_venture_actions::repo::{
     detect_language::{DetectedLanguages, Language},
     governance::GovernanceReport,
-    run_repo_analysis, FinalReport, MaturityScore, RepoAnalysisRequest,
-    CTX_DETECTED_LANGUAGES, CTX_REPO_URL,
+    run_repo_analysis, FinalReport, MaturityScore, RepoAnalysisRequest, CTX_DETECTED_LANGUAGES,
+    CTX_REPO_URL,
 };
-use rusty_venture_core::context::ExecutionContext;
 use rusty_venture_core::action::Action;
+use rusty_venture_core::context::ExecutionContext;
 use rusty_venture_improve::{ContainerizeAction, GenerateGovernanceFilesAction, GovernanceFile};
 use rusty_venture_llm::ClaudeConnector;
-use tracing_subscriber::EnvFilter;
 use std::path::Path;
+use tracing_subscriber::EnvFilter;
 #[derive(Parser)]
 #[command(
     name = "rusty-venture",
@@ -59,7 +59,11 @@ struct AnalyzeArgs {
 
     /// SQLite database URL for persisting results.
     /// Set to "" to skip persistence. Defaults to sqlite://rusty-venture.db.
-    #[arg(long, env = "DATABASE_URL", default_value = "sqlite://rusty-venture.db")]
+    #[arg(
+        long,
+        env = "DATABASE_URL",
+        default_value = "sqlite://rusty-venture.db"
+    )]
     database_url: String,
 
     /// Skip Docker container spin-up and analyse using only local filesystem
@@ -67,6 +71,12 @@ struct AnalyzeArgs {
     /// Dependency scanning and file-audit checks are skipped in this mode.
     #[arg(long, short = 'n')]
     no_container: bool,
+
+    /// Maturity tier to execute (1 = Static Discovery, 2 = Content Quality,
+    /// 3 = Active Functional Validation). Defaults to 1. Higher tiers are
+    /// only meaningful after the previous tier has been fully completed.
+    #[arg(long, short = 't', default_value = "1")]
+    tier: u8,
 }
 
 #[derive(Parser)]
@@ -80,7 +90,11 @@ struct HistoryArgs {
     limit: i64,
 
     /// SQLite database URL
-    #[arg(long, env = "DATABASE_URL", default_value = "sqlite://rusty-venture.db")]
+    #[arg(
+        long,
+        env = "DATABASE_URL",
+        default_value = "sqlite://rusty-venture.db"
+    )]
     database_url: String,
 }
 
@@ -146,7 +160,8 @@ async fn main() -> Result<()> {
 }
 
 async fn run_improve(args: ImproveArgs) -> Result<()> {
-    let repo_path = Path::new(&args.repo_path).canonicalize()
+    let repo_path = Path::new(&args.repo_path)
+        .canonicalize()
         .unwrap_or_else(|_| Path::new(&args.repo_path).to_path_buf());
 
     eprintln!("Scanning repository: {}", repo_path.display());
@@ -161,7 +176,8 @@ async fn run_improve(args: ImproveArgs) -> Result<()> {
     let gov = detect_governance_local(&repo_path);
     let ctx = ExecutionContext::new("improve-governance");
     ctx.insert(CTX_DETECTED_LANGUAGES, languages.clone()).await;
-    ctx.insert(rusty_venture_actions::repo::CTX_GOVERNANCE_REPORT, gov).await;
+    ctx.insert(rusty_venture_actions::repo::CTX_GOVERNANCE_REPORT, gov)
+        .await;
 
     let gov_files: Vec<GovernanceFile> = GenerateGovernanceFilesAction
         .execute(&ctx, ())
@@ -175,7 +191,10 @@ async fn run_improve(args: ImproveArgs) -> Result<()> {
         eprintln!("✓  All governance files are already present.");
     } else if args.dry_run {
         println!();
-        println!("Governance files that would be created ({} total):", gov_files.len());
+        println!(
+            "Governance files that would be created ({} total):",
+            gov_files.len()
+        );
         for f in &gov_files {
             println!("  + {}", f.path);
         }
@@ -197,28 +216,33 @@ async fn run_improve(args: ImproveArgs) -> Result<()> {
         let repo_url = args.repo_url.as_deref().ok_or_else(|| {
             anyhow::anyhow!("--repo-url <url> is required when --containerize is set")
         })?;
-        let api_key = args
-            .api_key
-            .clone()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "--api-key or ANTHROPIC_API_KEY env var is required when --containerize is set"
-                )
-            })?;
+        let api_key = args.api_key.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "--api-key or ANTHROPIC_API_KEY env var is required when --containerize is set"
+            )
+        })?;
 
         eprintln!("Generating Dockerfile via LLM for {repo_url} ...");
 
         let connector = std::sync::Arc::new(ClaudeConnector::new(&api_key));
         let container_ctx = ExecutionContext::new("improve-containerize");
-        container_ctx.insert(CTX_REPO_URL, repo_url.to_string()).await;
-        container_ctx.insert(CTX_DETECTED_LANGUAGES, languages).await;
+        container_ctx
+            .insert(CTX_REPO_URL, repo_url.to_string())
+            .await;
+        container_ctx
+            .insert(CTX_DETECTED_LANGUAGES, languages)
+            .await;
 
         let c_result = ContainerizeAction::new(connector)
             .execute(&container_ctx, ())
             .await
             .map_err(|e| anyhow::anyhow!("Containerization failed: {e}"))?;
 
-        let validated_label = if c_result.build_validated { "validated" } else { "not validated" };
+        let validated_label = if c_result.build_validated {
+            "validated"
+        } else {
+            "not validated"
+        };
 
         if args.dry_run {
             println!(
@@ -282,10 +306,7 @@ fn detect_governance_local(repo_path: &Path) -> GovernanceReport {
         has_readme: has_any(&["README.md", "README.txt", "README.rst", "README"]),
         has_changelog: has_any(&["CHANGELOG.md", "CHANGELOG.txt", "HISTORY.md"]),
         has_contributing: has_any(&["CONTRIBUTING.md", "CONTRIBUTING.txt"]),
-        has_security_policy: has_any(&[
-            "SECURITY.md",
-            ".github/SECURITY.md",
-        ]),
+        has_security_policy: has_any(&["SECURITY.md", ".github/SECURITY.md"]),
         has_dependabot: has(".github/dependabot.yml"),
         has_lint_config: has_any(&[
             "clippy.toml",
@@ -307,12 +328,17 @@ fn detect_governance_local(repo_path: &Path) -> GovernanceReport {
 async fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     eprintln!("Analyzing repository: {}", args.repo_url);
 
+    let scan_tier = args.tier.clamp(1, 3);
     let result = run_repo_analysis(RepoAnalysisRequest {
         repo_url: args.repo_url,
         branch: args.branch,
         claude_api_key: args.api_key,
         docker_socket: None,
         skip_container: args.no_container,
+        log_tx: None,
+        commit_hash: None,
+        cache_repo_image: false,
+        scan_tier,
     })
     .await?;
 
@@ -324,7 +350,15 @@ async fn run_analyze(args: AnalyzeArgs) -> Result<()> {
                 // use an empty audit report for violation persistence (violations
                 // are still captured in the raw FinalReport JSON in the scans table).
                 let empty_audit = rusty_venture_actions::repo::AuditReport::default();
-                if let Err(e) = rusty_venture_store::insert_scan(&pool, &result, &result.maturity, &empty_audit).await {
+                if let Err(e) = rusty_venture_store::insert_scan(
+                    &pool,
+                    &result,
+                    &result.maturity,
+                    &empty_audit,
+                    result.scan_tier,
+                )
+                .await
+                {
                     eprintln!("Warning: failed to persist scan to database: {e}");
                 }
             }
@@ -333,7 +367,9 @@ async fn run_analyze(args: AnalyzeArgs) -> Result<()> {
     }
 
     match args.output {
-        OutputFormat::Text => print_report_text(&result.report, &result.maturity, result.duration_ms),
+        OutputFormat::Text => {
+            print_report_text(&result.report, &result.maturity, result.duration_ms)
+        }
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result)?),
     }
 
@@ -354,7 +390,10 @@ async fn run_history(args: HistoryArgs) -> Result<()> {
     }
 
     println!();
-    println!("{:<44} {:<12} {:<10} {:<10} {:<12}", "SCAN ID", "DATE", "RISK", "MATURITY", "GRADE");
+    println!(
+        "{:<44} {:<12} {:<10} {:<10} {:<12}",
+        "SCAN ID", "DATE", "RISK", "MATURITY", "GRADE"
+    );
     println!("{:<44} {:<12} {:<10} {:<10} {:<12}", "REPO", "", "", "", "");
     println!("{}", "─".repeat(90));
 
@@ -376,7 +415,11 @@ async fn run_history(args: HistoryArgs) -> Result<()> {
 }
 
 fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max { s } else { &s[..max] }
+    if s.len() <= max {
+        s
+    } else {
+        &s[..max]
+    }
 }
 
 fn print_report_text(report: &FinalReport, maturity: &MaturityScore, duration_ms: u64) {
@@ -391,7 +434,10 @@ fn print_report_text(report: &FinalReport, maturity: &MaturityScore, duration_ms
     println!("==========================================================");
     println!(" RUSTY-VENTURE REPOSITORY ANALYSIS REPORT");
     println!("==========================================================");
-    println!(" Risk Score:     {}/100 [{}]", report.risk_score, risk_label);
+    println!(
+        " Risk Score:     {}/100 [{}]",
+        report.risk_score, risk_label
+    );
     println!(
         " Maturity Score: {}/100 [{}]",
         maturity.composite,
@@ -440,7 +486,10 @@ fn print_report_text(report: &FinalReport, maturity: &MaturityScore, duration_ms
     }
 
     print_section("LANGUAGE INSIGHTS", &report.language_insights);
-    print_section("DEPENDENCY RECOMMENDATIONS", &report.dependency_recommendations);
+    print_section(
+        "DEPENDENCY RECOMMENDATIONS",
+        &report.dependency_recommendations,
+    );
     print_section("DOCKERFILE FINDINGS", &report.dockerfile_findings);
     print_section("SECURITY VIOLATIONS", &report.security_violations);
     print_section("GENERAL RECOMMENDATIONS", &report.general_recommendations);

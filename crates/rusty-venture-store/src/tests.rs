@@ -31,13 +31,12 @@ mod migration {
             "signal_evidence",
             "decision_graphs",
         ] {
-            let count: (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-            )
-            .bind(table)
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|e| panic!("query sqlite_master for `{table}`: {e}"));
+            let count: (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap_or_else(|e| panic!("query sqlite_master for `{table}`: {e}"));
             assert_eq!(count.0, 1, "table `{table}` is missing after migration");
         }
     }
@@ -46,14 +45,16 @@ mod migration {
     async fn v1_tables_still_exist_after_migration_002() {
         let pool = open_test_pool().await;
         for table in ["repos", "scans", "maturity_dimensions", "violations"] {
-            let count: (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
-            )
-            .bind(table)
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|e| panic!("query sqlite_master for `{table}`: {e}"));
-            assert_eq!(count.0, 1, "v1 table `{table}` disappeared after migration 002");
+            let count: (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap_or_else(|e| panic!("query sqlite_master for `{table}`: {e}"));
+            assert_eq!(
+                count.0, 1,
+                "v1 table `{table}` disappeared after migration 002"
+            );
         }
     }
 
@@ -71,8 +72,18 @@ mod migration {
                 r.get::<String, _>("name")
             })
             .collect();
-        for col in ["id", "scan_id", "model_id", "composite", "grade", "created_at"] {
-            assert!(names.contains(&col.to_string()), "scan_grades missing column `{col}`");
+        for col in [
+            "id",
+            "scan_id",
+            "model_id",
+            "composite",
+            "grade",
+            "created_at",
+        ] {
+            assert!(
+                names.contains(&col.to_string()),
+                "scan_grades missing column `{col}`"
+            );
         }
     }
 
@@ -99,7 +110,10 @@ mod migration {
             "points",
             "detail",
         ] {
-            assert!(names.contains(&col.to_string()), "scan_signals missing column `{col}`");
+            assert!(
+                names.contains(&col.to_string()),
+                "scan_signals missing column `{col}`"
+            );
         }
     }
 
@@ -113,13 +127,12 @@ mod migration {
             "idx_signal_evidence_signal",
             "idx_decision_graphs_scan",
         ] {
-            let count: (i64,) = sqlx::query_as(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?",
-            )
-            .bind(index)
-            .fetch_one(&pool)
-            .await
-            .unwrap_or_else(|e| panic!("query index `{index}`: {e}"));
+            let count: (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?")
+                    .bind(index)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap_or_else(|e| panic!("query index `{index}`: {e}"));
             assert_eq!(count.0, 1, "index `{index}` is missing after migration");
         }
     }
@@ -138,8 +151,8 @@ mod store {
 
     use crate::queries::{
         get_decision_graph_for_scan, get_scan_grade_v2, insert_decision_graph,
-        insert_dimension_score_v2, insert_scan_grade, insert_scan_signal,
-        insert_signal_evidence, upsert_grade_model,
+        insert_dimension_score_v2, insert_scan_grade, insert_scan_signal, insert_signal_evidence,
+        upsert_grade_model,
     };
 
     async fn open_test_pool() -> sqlx::SqlitePool {
@@ -159,15 +172,13 @@ mod store {
         let scan_id = Uuid::new_v4().to_string();
         let repo_id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO repos (id, url, first_seen) VALUES (?1, ?2, ?3)",
-        )
-        .bind(&repo_id)
-        .bind(format!("https://example.com/{repo_id}"))
-        .bind(&now)
-        .execute(pool)
-        .await
-        .expect("seed repo");
+        sqlx::query("INSERT INTO repos (id, url, first_seen) VALUES (?1, ?2, ?3)")
+            .bind(&repo_id)
+            .bind(format!("https://example.com/{repo_id}"))
+            .bind(&now)
+            .execute(pool)
+            .await
+            .expect("seed repo");
         sqlx::query(
             r#"INSERT INTO scans
                (id, repo_id, scanned_at, duration_ms, risk_score,
@@ -221,12 +232,11 @@ mod store {
             .await
             .expect("second upsert (idempotent)");
 
-        let count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM grade_models WHERE id = ?")
-                .bind(&model_id)
-                .fetch_one(&pool)
-                .await
-                .expect("count");
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM grade_models WHERE id = ?")
+            .bind(&model_id)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
         assert_eq!(count.0, 1, "upsert must not create duplicate rows");
     }
 
@@ -285,10 +295,9 @@ mod store {
             .await
             .unwrap();
 
-        let dim_id =
-            insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
-                .await
-                .expect("insert_dimension_score_v2");
+        let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
+            .await
+            .expect("insert_dimension_score_v2");
 
         let row: crate::models::DimensionScoreV2Row = sqlx::query_as(
             "SELECT id, scan_grade_id, dimension, score, weight \
@@ -321,10 +330,9 @@ mod store {
         insert_scan_grade(&pool, &grade_id, &scan_id, &model_id, 75, "GOLD", &now)
             .await
             .unwrap();
-        let dim_id =
-            insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
-                .await
-                .unwrap();
+        let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 80, 0.25)
+            .await
+            .unwrap();
 
         let signal_id = insert_scan_signal(
             &pool,
@@ -499,14 +507,12 @@ mod store {
             .unwrap();
 
         // 3. Two dimensions with signals
-        let security_id =
-            insert_dimension_score_v2(&pool, &grade_id, "Security", 90, 0.25)
-                .await
-                .unwrap();
-        let gov_id =
-            insert_dimension_score_v2(&pool, &grade_id, "Project Governance", 70, 0.15)
-                .await
-                .unwrap();
+        let security_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 90, 0.25)
+            .await
+            .unwrap();
+        let gov_id = insert_dimension_score_v2(&pool, &grade_id, "Project Governance", 70, 0.15)
+            .await
+            .unwrap();
 
         let sig1 = insert_scan_signal(
             &pool,
@@ -561,13 +567,12 @@ mod store {
         assert_eq!(grade.composite, 82);
         assert_eq!(grade.grade, "PLATINUM");
 
-        let dim_count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM scan_dimension_scores_v2 WHERE scan_grade_id = ?",
-        )
-        .bind(&grade_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let dim_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM scan_dimension_scores_v2 WHERE scan_grade_id = ?")
+                .bind(&grade_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(dim_count.0, 2, "expected 2 dimension scores");
 
         let signal_count: (i64,) = sqlx::query_as(
@@ -692,12 +697,11 @@ mod backfill {
         let backfilled = backfill_v2_grades(&pool).await.expect("backfill_v2_grades");
         assert_eq!(backfilled, 1, "should have backfilled exactly 1 scan");
 
-        let count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM scan_grades WHERE scan_id = ?")
-                .bind(&scan_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM scan_grades WHERE scan_id = ?")
+            .bind(&scan_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count.0, 1, "scan_grades row must exist after backfill");
     }
 
@@ -735,13 +739,12 @@ mod backfill {
         .await
         .unwrap();
 
-        let dim_count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM scan_dimension_scores_v2 WHERE scan_grade_id = ?",
-        )
-        .bind(&grade.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let dim_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM scan_dimension_scores_v2 WHERE scan_grade_id = ?")
+                .bind(&grade.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(dim_count.0, 1, "expected 1 dimension row (Security)");
 
         let sig_count: (i64,) = sqlx::query_as(
@@ -765,12 +768,11 @@ mod backfill {
         let second = backfill_v2_grades(&pool).await.expect("second backfill");
         assert_eq!(second, 0, "second backfill must be a no-op");
 
-        let count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM scan_grades WHERE scan_id = ?")
-                .bind(&scan_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM scan_grades WHERE scan_id = ?")
+            .bind(&scan_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(count.0, 1, "must not duplicate scan_grades row");
     }
 
@@ -842,8 +844,8 @@ mod overview {
     use uuid::Uuid;
 
     use crate::queries::{
-        get_repo_overview, get_repo_trends, list_repos,
-        insert_dimension_score_v2, insert_scan_signal,
+        get_repo_overview, get_repo_trends, insert_dimension_score_v2, insert_scan_signal,
+        list_repos,
     };
 
     async fn make_pool() -> sqlx::SqlitePool {
@@ -933,7 +935,10 @@ mod overview {
         let pool = make_pool().await;
         let repo_id = seed_repo(&pool).await;
         let repos = list_repos(&pool, 10).await.expect("list_repos");
-        assert!(repos.iter().any(|r| r.id == repo_id), "seeded repo must appear in list");
+        assert!(
+            repos.iter().any(|r| r.id == repo_id),
+            "seeded repo must appear in list"
+        );
     }
 
     #[tokio::test]
@@ -1037,9 +1042,17 @@ mod overview {
         insert_scan_signal(&pool, dim_id, "sig_pass", "passed signal", true, 40, None)
             .await
             .unwrap();
-        insert_scan_signal(&pool, dim_id, "sig_fail", "failed signal", false, 30, Some("fix it"))
-            .await
-            .unwrap();
+        insert_scan_signal(
+            &pool,
+            dim_id,
+            "sig_fail",
+            "failed signal",
+            false,
+            30,
+            Some("fix it"),
+        )
+        .await
+        .unwrap();
 
         let overview = get_repo_overview(&pool, &repo_id)
             .await
@@ -1068,15 +1081,20 @@ mod overview {
                 .unwrap();
         }
         for i in 0..2 {
-            insert_scan_signal(&pool, dim_id, &format!("fail_{i}"), "f", false, 20, Some("fix"))
-                .await
-                .unwrap();
+            insert_scan_signal(
+                &pool,
+                dim_id,
+                &format!("fail_{i}"),
+                "f",
+                false,
+                20,
+                Some("fix"),
+            )
+            .await
+            .unwrap();
         }
 
-        let overview = get_repo_overview(&pool, &repo_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
 
         assert!(
             (overview.confidence - 50.0).abs() < 1.0,
@@ -1096,29 +1114,44 @@ mod overview {
             .unwrap();
 
         // A high-value blocker and a low-value blocker
-        insert_scan_signal(&pool, dim_id, "big_blocker", "Big", false, 40, Some("add SECURITY.md"))
-            .await
-            .unwrap();
-        insert_scan_signal(&pool, dim_id, "small_blocker", "Small", false, 10, Some("minor fix"))
-            .await
-            .unwrap();
+        insert_scan_signal(
+            &pool,
+            dim_id,
+            "big_blocker",
+            "Big",
+            false,
+            40,
+            Some("add SECURITY.md"),
+        )
+        .await
+        .unwrap();
+        insert_scan_signal(
+            &pool,
+            dim_id,
+            "small_blocker",
+            "Small",
+            false,
+            10,
+            Some("minor fix"),
+        )
+        .await
+        .unwrap();
         // A passing signal — should NOT appear in blockers
         insert_scan_signal(&pool, dim_id, "passer", "Pass", true, 30, None)
             .await
             .unwrap();
 
-        let overview = get_repo_overview(&pool, &repo_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
 
         assert_eq!(overview.top_blockers.len(), 2, "two failed signals");
         assert_eq!(
-            overview.top_blockers[0].signal_name,
-            "big_blocker",
+            overview.top_blockers[0].signal_name, "big_blocker",
             "highest-points blocker must be first"
         );
-        assert!(!overview.top_blockers.iter().any(|b| b.signal_name == "passer"));
+        assert!(!overview
+            .top_blockers
+            .iter()
+            .any(|b| b.signal_name == "passer"));
     }
 
     #[tokio::test]
@@ -1130,14 +1163,17 @@ mod overview {
         let dim_id = insert_dimension_score_v2(&pool, &grade_id, "Security", 70, 0.25)
             .await
             .unwrap();
-        insert_scan_signal(&pool, dim_id, "s1", "d", true, 40, None).await.unwrap();
-        insert_scan_signal(&pool, dim_id, "s2", "d", true, 30, None).await.unwrap();
-        insert_scan_signal(&pool, dim_id, "s3", "d", false, 20, Some("fix")).await.unwrap();
-
-        let overview = get_repo_overview(&pool, &repo_id)
+        insert_scan_signal(&pool, dim_id, "s1", "d", true, 40, None)
             .await
-            .unwrap()
             .unwrap();
+        insert_scan_signal(&pool, dim_id, "s2", "d", true, 30, None)
+            .await
+            .unwrap();
+        insert_scan_signal(&pool, dim_id, "s3", "d", false, 20, Some("fix"))
+            .await
+            .unwrap();
+
+        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
 
         assert_eq!(overview.dimensions.len(), 1);
         let dim = &overview.dimensions[0];
@@ -1160,11 +1196,11 @@ mod overview {
             .await
             .unwrap();
 
-        let overview = get_repo_overview(&pool, &repo_id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(overview.grade, "DIAMOND", "must use the latest scan's grade");
+        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
+        assert_eq!(
+            overview.grade, "DIAMOND",
+            "must use the latest scan's grade"
+        );
     }
 
     // ── get_repo_trends ──────────────────────────────────────────────────────

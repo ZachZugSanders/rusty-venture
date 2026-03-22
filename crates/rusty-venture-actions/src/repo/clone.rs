@@ -70,20 +70,15 @@ impl Action for CloneRepoAction {
         .await?;
 
         // Install git if not present (for ubuntu:22.04 base images)
-        let git_check = exec_in_container(
-            &docker,
-            &container_id,
-            ExecCommand::new(["which", "git"]),
-        )
-        .await?;
+        let git_check =
+            exec_in_container(&docker, &container_id, ExecCommand::new(["which", "git"])).await?;
 
         if !git_check.is_success() {
             info!("Installing git in container");
             let install = exec_in_container(
                 &docker,
                 &container_id,
-                ExecCommand::new(["apt-get", "update", "-qq"])
-                    .timeout(120),
+                ExecCommand::new(["apt-get", "update", "-qq"]).timeout(120),
             )
             .await?;
             if !install.is_success() {
@@ -92,8 +87,7 @@ impl Action for CloneRepoAction {
             let install = exec_in_container(
                 &docker,
                 &container_id,
-                ExecCommand::new(["apt-get", "install", "-y", "-qq", "git"])
-                    .timeout(120),
+                ExecCommand::new(["apt-get", "install", "-y", "-qq", "git"]).timeout(120),
             )
             .await?;
             if !install.is_success() {
@@ -102,7 +96,12 @@ impl Action for CloneRepoAction {
         }
 
         // Build the clone command
-        let mut clone_cmd = vec!["git".to_string(), "clone".to_string(), "--depth".to_string(), "1".to_string()];
+        let mut clone_cmd = vec![
+            "git".to_string(),
+            "clone".to_string(),
+            "--depth".to_string(),
+            "1".to_string(),
+        ];
 
         if let Some(ref branch) = self.branch {
             clone_cmd.push("--branch".to_string());
@@ -136,7 +135,8 @@ impl Action for CloneRepoAction {
             branch: self.branch.clone(),
         };
 
-        ctx.insert(CTX_REPO_LOCAL_PATH, self.dest_path.clone()).await;
+        ctx.insert(CTX_REPO_LOCAL_PATH, self.dest_path.clone())
+            .await;
         ctx.insert(CTX_REPO_URL, self.repo_url.clone()).await;
 
         Ok(clone_result)

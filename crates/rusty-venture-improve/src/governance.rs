@@ -39,10 +39,14 @@ impl Action for GenerateGovernanceFilesAction {
         ctx: &ExecutionContext,
         _input: (),
     ) -> Result<Vec<GovernanceFile>, CoreError> {
-        let gov: GovernanceReport =
-            ctx.get::<GovernanceReport>(CTX_GOVERNANCE_REPORT).await.unwrap_or_default();
-        let languages: DetectedLanguages =
-            ctx.get::<DetectedLanguages>(CTX_DETECTED_LANGUAGES).await.unwrap_or_default();
+        let gov: GovernanceReport = ctx
+            .get::<GovernanceReport>(CTX_GOVERNANCE_REPORT)
+            .await
+            .unwrap_or_default();
+        let languages: DetectedLanguages = ctx
+            .get::<DetectedLanguages>(CTX_DETECTED_LANGUAGES)
+            .await
+            .unwrap_or_default();
         let lang = &languages.primary;
 
         let mut files: Vec<GovernanceFile> = vec![];
@@ -429,7 +433,10 @@ mod tests {
     #[tokio::test]
     async fn generates_license_when_missing() {
         let files = run_action(all_missing_report(), rust_languages()).await;
-        assert!(paths(&files).contains(&"LICENSE"), "LICENSE must be generated");
+        assert!(
+            paths(&files).contains(&"LICENSE"),
+            "LICENSE must be generated"
+        );
     }
 
     #[tokio::test]

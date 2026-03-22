@@ -108,6 +108,9 @@ pub struct ScanSignalRow {
     pub points: i64,
     /// Optional recommendation when the signal fails.
     pub detail: Option<String>,
+    /// Maturity tier this signal belongs to (1 = Static Discovery,
+    /// 2 = Content Quality, 3 = Active Functional Validation).
+    pub tier: i64,
 }
 
 /// One piece of evidence attached to a signal (signal_evidence table).
@@ -152,6 +155,8 @@ pub struct RepoSummary {
     pub latest_maturity_grade: Option<String>,
     pub latest_composite_maturity: Option<i64>,
     pub latest_risk_score: Option<i64>,
+    /// Highest tier that has been fully unlocked for this repo (1, 2, or 3).
+    pub max_unlocked_tier: i64,
 }
 
 /// Per-dimension breakdown inside a `RepoOverview`.
@@ -173,6 +178,37 @@ pub struct BlockerItem {
     pub detail: Option<String>,
 }
 
+/// One signal (passed or failed) inside a `DimensionSignals` breakdown.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalItem {
+    pub name: String,
+    pub passed: bool,
+    pub points: i64,
+    pub detail: Option<String>,
+    /// Maturity tier this signal belongs to.
+    pub tier: i64,
+}
+
+/// All signals for one dimension, included in `RepoOverview`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DimensionSignals {
+    pub dimension: String,
+    pub score: i64,
+    pub weight: f64,
+    pub signals: Vec<SignalItem>,
+}
+
+/// LLM-generated narrative report, extracted from the stored `raw_report` blob.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmReport {
+    pub summary: String,
+    pub language_insights: Vec<String>,
+    pub dependency_recommendations: Vec<String>,
+    pub dockerfile_findings: Vec<String>,
+    pub security_violations: Vec<String>,
+    pub general_recommendations: Vec<String>,
+}
+
 /// Full overview payload for `GET /repos/:id/overview`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoOverview {
@@ -187,6 +223,14 @@ pub struct RepoOverview {
     pub dimensions: Vec<DimensionOverview>,
     /// Up to 5 failed signals with highest point values.
     pub top_blockers: Vec<BlockerItem>,
+    /// All signals grouped by dimension (passed + failed).
+    pub signals_by_dimension: Vec<DimensionSignals>,
+    /// LLM-generated narrative, if available.
+    pub llm_report: Option<LlmReport>,
+    /// Which tier was executed for the most recent scan (1, 2, or 3).
+    pub scan_tier: i64,
+    /// Highest tier that has been fully unlocked and is ready to advance from.
+    pub max_unlocked_tier: i64,
 }
 
 /// One data point in the trend series returned by `GET /repos/:id/trends`.

@@ -1,0 +1,27 @@
+# Compiled output — never send these into the Docker build context
+target/
+tests/
+
+# Frontend has its own build context
+frontend/
+
+# Version control
+.git/
+.gitignore
+
+# Local environment / secrets
+.env
+.env.*
+
+# Python virtualenv + egg-info
+.venv/
+rusty_venture.egg-info/
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.db
+*.log
+*.sqlite
+
+.playwright-mcp

@@ -10,10 +10,8 @@ use rusty_venture_vcs::RepoProvider;
 use tokio::sync::oneshot;
 
 use crate::{
-    commit::CreateBranchAction,
-    containerize::ContainerizeAction,
-    dependents::DiscoverDependentsAction,
-    gate::DependencyDecisionGate,
+    commit::CreateBranchAction, containerize::ContainerizeAction,
+    dependents::DiscoverDependentsAction, gate::DependencyDecisionGate,
     governance::GenerateGovernanceFilesAction,
 };
 
@@ -101,14 +99,18 @@ impl<C: LlmConnector + 'static> ImprovementWorkflowBuilder<C> {
                 .on_failure(OnFailure::Continue)
                 .build(),
 
-            "generate-governance-files" | "add-license" | "add-security-policy"
-            | "add-contributing" | "add-changelog" | "add-dependabot" | "add-lint-config"
-            | "add-pre-commit" | "add-safety-config" => {
-                StepBuilder::<(), _>::new("generate-governance-files")
-                    .action(GenerateGovernanceFilesAction)
-                    .on_failure(OnFailure::Continue)
-                    .build()
-            }
+            "generate-governance-files"
+            | "add-license"
+            | "add-security-policy"
+            | "add-contributing"
+            | "add-changelog"
+            | "add-dependabot"
+            | "add-lint-config"
+            | "add-pre-commit"
+            | "add-safety-config" => StepBuilder::<(), _>::new("generate-governance-files")
+                .action(GenerateGovernanceFilesAction)
+                .on_failure(OnFailure::Continue)
+                .build(),
 
             "discover-dependents" => StepBuilder::<(), _>::new("discover-dependents")
                 .action(DiscoverDependentsAction::new(Arc::clone(&self.provider)))
@@ -118,10 +120,7 @@ impl<C: LlmConnector + 'static> ImprovementWorkflowBuilder<C> {
             "dependency-decision-gate" => {
                 let rx = self.decision_rx.take()?; // consumed — gate is single-use
                 StepBuilder::<(), _>::new("dependency-decision-gate")
-                    .action(DependencyDecisionGate::new(
-                        Arc::clone(&self.connector),
-                        rx,
-                    ))
+                    .action(DependencyDecisionGate::new(Arc::clone(&self.connector), rx))
                     .on_failure(OnFailure::Continue)
                     .build()
             }

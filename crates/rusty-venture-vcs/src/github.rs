@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tracing::{debug, info, warn};
 
 use crate::{
-    provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoRef, RepoProvider},
+    provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoProvider, RepoRef},
     VcsError,
 };
 
@@ -51,10 +51,7 @@ impl GithubProvider {
             HeaderName::from_static("x-github-api-version"),
             HeaderValue::from_static("2022-11-28"),
         );
-        headers.insert(
-            USER_AGENT,
-            HeaderValue::from_static("rusty-venture/0.1"),
-        );
+        headers.insert(USER_AGENT, HeaderValue::from_static("rusty-venture/0.1"));
 
         let client = Client::builder()
             .default_headers(headers)
@@ -87,12 +84,14 @@ impl GithubProvider {
             return Ok(None);
         }
 
-        let resp = resp.error_for_status().map_err(|e| {
-            VcsError::Api(format!("GET {url}: {}", e.status().unwrap_or_default()))
-        })?;
+        let resp = resp
+            .error_for_status()
+            .map_err(|e| VcsError::Api(format!("GET {url}: {}", e.status().unwrap_or_default())))?;
 
         Ok(Some(
-            resp.json::<T>().await.map_err(|e| VcsError::Parse(e.to_string()))?,
+            resp.json::<T>()
+                .await
+                .map_err(|e| VcsError::Parse(e.to_string()))?,
         ))
     }
 }
@@ -141,7 +140,7 @@ struct GhRefObject {
 
 #[derive(Deserialize)]
 struct GhContents {
-    content: Option<String>,  // base64-encoded, only present for files ≤ 1 MB
+    content: Option<String>, // base64-encoded, only present for files ≤ 1 MB
     sha: String,
     encoding: Option<String>,
 }
@@ -332,9 +331,8 @@ impl RepoProvider for GithubProvider {
                 let bytes = B64
                     .decode(cleaned)
                     .map_err(|e| VcsError::Parse(format!("base64 decode {path}: {e}")))?;
-                let text = String::from_utf8(bytes).map_err(|e| {
-                    VcsError::Parse(format!("UTF-8 decode {path}: {e}"))
-                })?;
+                let text = String::from_utf8(bytes)
+                    .map_err(|e| VcsError::Parse(format!("UTF-8 decode {path}: {e}")))?;
                 Ok(Some((text, c.sha)))
             }
         }

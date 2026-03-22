@@ -74,10 +74,18 @@ impl<C: LlmConnector + 'static> Action for GenerateReportAction<C> {
         // Gather all analysis data from context
         let repo_url = ctx.get::<String>(CTX_REPO_URL).await.unwrap_or_default();
 
-        let detected = ctx.get::<super::detect_language::DetectedLanguages>(CTX_DETECTED_LANGUAGES).await;
-        let dep_report = ctx.get::<super::analyze_deps::DependencyReport>(CTX_DEPENDENCY_REPORT).await;
-        let dockerfile_report = ctx.get::<super::find_dockerfiles::DockerfileReport>(CTX_DOCKERFILE_REPORT).await;
-        let audit_report = ctx.get::<super::audit_files::AuditReport>(CTX_AUDIT_REPORT).await;
+        let detected = ctx
+            .get::<super::detect_language::DetectedLanguages>(CTX_DETECTED_LANGUAGES)
+            .await;
+        let dep_report = ctx
+            .get::<super::analyze_deps::DependencyReport>(CTX_DEPENDENCY_REPORT)
+            .await;
+        let dockerfile_report = ctx
+            .get::<super::find_dockerfiles::DockerfileReport>(CTX_DOCKERFILE_REPORT)
+            .await;
+        let audit_report = ctx
+            .get::<super::audit_files::AuditReport>(CTX_AUDIT_REPORT)
+            .await;
 
         // Build the analysis payload for the LLM
         let payload = serde_json::json!({
@@ -92,8 +100,7 @@ impl<C: LlmConnector + 'static> Action for GenerateReportAction<C> {
 
         let request = LlmRequestBuilder::new()
             .system(REPORT_SYSTEM_PROMPT)
-            .user(serde_json::to_string_pretty(&payload)
-                .map_err(|e| CoreError::Serde(e))?)
+            .user(serde_json::to_string_pretty(&payload).map_err(CoreError::Serde)?)
             .max_tokens(2048)
             .temperature(0.1)
             .build();
@@ -112,7 +119,10 @@ impl<C: LlmConnector + 'static> Action for GenerateReportAction<C> {
             ))
         })?;
 
-        info!(risk_score = report.risk_score, "Report generated successfully");
+        info!(
+            risk_score = report.risk_score,
+            "Report generated successfully"
+        );
 
         ctx.insert(CTX_FINAL_REPORT, report.clone()).await;
         Ok(report)

@@ -8,10 +8,7 @@ pub enum RetryStrategy {
     None,
 
     /// Retry up to `max_attempts` times with a fixed delay between each.
-    Fixed {
-        max_attempts: u32,
-        delay: Duration,
-    },
+    Fixed { max_attempts: u32, delay: Duration },
 
     /// Exponential backoff: each retry doubles the delay, capped at `max_delay`.
     Exponential {
@@ -37,9 +34,17 @@ impl RetryStrategy {
         match self {
             RetryStrategy::None => None,
             RetryStrategy::Fixed { delay, .. } => {
-                if attempt > 1 { Some(*delay) } else { None }
+                if attempt > 1 {
+                    Some(*delay)
+                } else {
+                    None
+                }
             }
-            RetryStrategy::Exponential { base_delay, max_delay, .. } => {
+            RetryStrategy::Exponential {
+                base_delay,
+                max_delay,
+                ..
+            } => {
                 if attempt <= 1 {
                     None
                 } else {

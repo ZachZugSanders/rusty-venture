@@ -11,12 +11,16 @@ use rusty_venture_actions::{
 use crate::db::Pool;
 
 /// Persist a completed analysis run to the database in a single transaction.
+///
+/// Returns the authoritative `repo_id` (UUID) for the upserted repo row so
+/// the caller can perform post-scan operations such as tier advancement.
 pub async fn insert_scan(
     pool: &Pool,
     result: &RepoAnalysisResult,
     maturity: &MaturityScore,
     audit: &AuditReport,
-) -> Result<()> {
+    scan_tier: u8,
+) -> Result<String> {
     let repo_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     let raw_report = serde_json::to_string(&result.report).context("serialise FinalReport")?;
@@ -55,8 +59,8 @@ pub async fn insert_scan(
     sqlx::query(
         r#"INSERT INTO scans
                (id, repo_id, scanned_at, duration_ms, risk_score,
-                composite_maturity, maturity_grade, raw_report, raw_maturity)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+                composite_maturity, maturity_grade, raw_report, raw_maturity, commit_hash, scan_tier)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
     )
     .bind(scan_id)
     .bind(&actual_repo_id)
@@ -67,6 +71,8 @@ pub async fn insert_scan(
     .bind(&grade)
     .bind(&raw_report)
     .bind(&raw_maturity)
+    .bind(&result.commit_hash)
+    .bind(scan_tier as i64)
     .execute(&mut *tx)
     .await
     .context("insert scan")?;
@@ -148,8 +154,8 @@ pub async fn insert_scan(
         for signal in &dim.signals {
             sqlx::query(
                 "INSERT INTO scan_signals \
-                 (dimension_score_id, name, description, passed, points, detail) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 (dimension_score_id, name, description, passed, points, detail, tier) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
             .bind(dim_id)
             .bind(&signal.name)
@@ -157,6 +163,7 @@ pub async fn insert_scan(
             .bind(signal.passed as i64)
             .bind(signal.points as i64)
             .bind(&signal.detail)
+            .bind(signal.tier as i64)
             .execute(&mut *tx)
             .await
             .context("insert scan_signal in insert_scan")?;
@@ -165,13 +172,12 @@ pub async fn insert_scan(
 
     // Store the full MaturityScore JSON AND the pre-computed DecisionGraph.
     let graph_id = Uuid::new_v4().to_string();
-    let graph_payload = serde_json::to_string(
-        &DecisionGraph::from_maturity_full(
-            maturity,
-            Some(result.report.risk_score),
-            NodeSizeConfig::default(),
-        )
-    ).context("serialise DecisionGraph payload")?;
+    let graph_payload = serde_json::to_string(&DecisionGraph::from_maturity_full(
+        maturity,
+        Some(result.report.risk_score),
+        NodeSizeConfig::default(),
+    ))
+    .context("serialise DecisionGraph payload")?;
     sqlx::query(
         "INSERT INTO decision_graphs (id, scan_id, graph_json, created_at, graph_payload) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -192,10 +198,11 @@ pub async fn insert_scan(
         scan_id = %scan_id,
         composite_maturity = maturity.composite,
         grade = %grade,
+        scan_tier = scan_tier,
         "Scan persisted to database"
     );
 
-    Ok(())
+    Ok(actual_repo_id)
 }
 
 /// Lightweight scan summary for display in the history table.
@@ -208,6 +215,32 @@ pub struct ScanSummary {
     pub risk_score: u8,
     pub composite_maturity: u8,
     pub maturity_grade: String,
+}
+
+/// Return the URL of a repo by its ID, or `None` if not found.
+pub async fn get_repo_url(pool: &Pool, repo_id: &str) -> Result<Option<String>> {
+    let row = sqlx::query("SELECT url FROM repos WHERE id = ?1")
+        .bind(repo_id)
+        .fetch_optional(pool)
+        .await
+        .context("get_repo_url")?;
+    Ok(row.map(|r| r.get("url")))
+}
+
+/// Check whether any scan for the given repo already used `commit_hash`.
+/// Returns the scan id if found, `None` if this commit has not been scanned.
+pub async fn scan_exists_for_commit(
+    pool: &Pool,
+    repo_id: &str,
+    commit_hash: &str,
+) -> Result<Option<String>> {
+    let row = sqlx::query("SELECT id FROM scans WHERE repo_id = ?1 AND commit_hash = ?2 LIMIT 1")
+        .bind(repo_id)
+        .bind(commit_hash)
+        .fetch_optional(pool)
+        .await
+        .context("scan_exists_for_commit")?;
+    Ok(row.map(|r| r.get("id")))
 }
 
 /// Return the N most recent scans across all repos.
@@ -238,7 +271,6 @@ pub async fn list_scans(pool: &Pool, limit: i64) -> Result<Vec<ScanSummary>> {
         })
         .collect())
 }
-
 
 // ── v2 query API ─────────────────────────────────────────────────────────────
 
@@ -330,6 +362,7 @@ pub async fn insert_dimension_score_v2(
 }
 
 /// Insert a signal row and return its auto-increment id.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_scan_signal(
     pool: &Pool,
     dimension_score_id: i64,
@@ -338,11 +371,12 @@ pub async fn insert_scan_signal(
     passed: bool,
     points: i64,
     detail: Option<&str>,
+    tier: i64,
 ) -> Result<i64> {
     let result = sqlx::query(
         "INSERT INTO scan_signals \
-         (dimension_score_id, name, description, passed, points, detail) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         (dimension_score_id, name, description, passed, points, detail, tier) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )
     .bind(dimension_score_id)
     .bind(name)
@@ -350,6 +384,7 @@ pub async fn insert_scan_signal(
     .bind(passed as i64)
     .bind(points)
     .bind(detail)
+    .bind(tier)
     .execute(pool)
     .await
     .context("insert scan_signal")?;
@@ -363,15 +398,13 @@ pub async fn insert_signal_evidence(
     kind: &str,
     value: &str,
 ) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO signal_evidence (signal_id, kind, value) VALUES (?1, ?2, ?3)",
-    )
-    .bind(signal_id)
-    .bind(kind)
-    .bind(value)
-    .execute(pool)
-    .await
-    .context("insert signal_evidence")?;
+    sqlx::query("INSERT INTO signal_evidence (signal_id, kind, value) VALUES (?1, ?2, ?3)")
+        .bind(signal_id)
+        .bind(kind)
+        .bind(value)
+        .execute(pool)
+        .await
+        .context("insert signal_evidence")?;
     Ok(())
 }
 
@@ -508,8 +541,8 @@ pub async fn backfill_v2_grades(pool: &Pool) -> Result<usize> {
             for signal in &dim.signals {
                 sqlx::query(
                     "INSERT INTO scan_signals \
-                     (dimension_score_id, name, description, passed, points, detail) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     (dimension_score_id, name, description, passed, points, detail, tier) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 )
                 .bind(dim_id)
                 .bind(&signal.name)
@@ -517,6 +550,7 @@ pub async fn backfill_v2_grades(pool: &Pool) -> Result<usize> {
                 .bind(signal.passed as i64)
                 .bind(signal.points as i64)
                 .bind(&signal.detail)
+                .bind(signal.tier as i64)
                 .execute(&mut *tx)
                 .await
                 .context("backfill: insert scan_signal")?;
@@ -568,8 +602,8 @@ pub async fn get_scan(pool: &Pool, scan_id: &str) -> Result<Option<ScanDetail>> 
 
     let report: serde_json::Value =
         serde_json::from_str(&r.get::<String, _>("raw_report")).unwrap_or(serde_json::Value::Null);
-    let maturity: serde_json::Value =
-        serde_json::from_str(&r.get::<String, _>("raw_maturity")).unwrap_or(serde_json::Value::Null);
+    let maturity: serde_json::Value = serde_json::from_str(&r.get::<String, _>("raw_maturity"))
+        .unwrap_or(serde_json::Value::Null);
 
     Ok(Some(ScanDetail {
         id: r.get::<String, _>("id"),
@@ -587,7 +621,11 @@ pub async fn get_scan(pool: &Pool, scan_id: &str) -> Result<Option<ScanDetail>> 
 // ── v1 list helpers ───────────────────────────────────────────────────────────
 
 /// Return the N most recent scans for one specific repo URL.
-pub async fn list_scans_for_repo(pool: &Pool, repo_url: &str, limit: i64) -> Result<Vec<ScanSummary>> {
+pub async fn list_scans_for_repo(
+    pool: &Pool,
+    repo_url: &str,
+    limit: i64,
+) -> Result<Vec<ScanSummary>> {
     let rows = sqlx::query(
         r#"SELECT s.id, r.url, s.scanned_at, s.duration_ms,
                   s.risk_score, s.composite_maturity, s.maturity_grade
@@ -630,6 +668,7 @@ pub async fn list_repos(pool: &Pool, limit: i64) -> Result<Vec<crate::models::Re
                r.url,
                r.first_seen,
                r.last_scanned,
+               r.max_unlocked_tier,
                COUNT(s.id)                                                       AS scan_count,
                (SELECT sg.grade        FROM scan_grades sg
                 JOIN scans ss ON ss.id = sg.scan_id
@@ -656,11 +695,20 @@ pub async fn list_repos(pool: &Pool, limit: i64) -> Result<Vec<crate::models::Re
             id: r.get::<String, _>("id"),
             url: r.get::<String, _>("url"),
             first_seen: r.get::<String, _>("first_seen"),
-            last_scanned: r.try_get::<Option<String>, _>("last_scanned").unwrap_or(None),
+            last_scanned: r
+                .try_get::<Option<String>, _>("last_scanned")
+                .unwrap_or(None),
             scan_count: r.get::<i64, _>("scan_count"),
-            latest_maturity_grade: r.try_get::<Option<String>, _>("latest_maturity_grade").unwrap_or(None),
-            latest_composite_maturity: r.try_get::<Option<i64>, _>("latest_composite_maturity").unwrap_or(None),
-            latest_risk_score: r.try_get::<Option<i64>, _>("latest_risk_score").unwrap_or(None),
+            latest_maturity_grade: r
+                .try_get::<Option<String>, _>("latest_maturity_grade")
+                .unwrap_or(None),
+            latest_composite_maturity: r
+                .try_get::<Option<i64>, _>("latest_composite_maturity")
+                .unwrap_or(None),
+            latest_risk_score: r
+                .try_get::<Option<i64>, _>("latest_risk_score")
+                .unwrap_or(None),
+            max_unlocked_tier: r.get::<i64, _>("max_unlocked_tier"),
         })
         .collect())
 }
@@ -671,9 +719,11 @@ pub async fn get_repo_overview(
     pool: &Pool,
     repo_id: &str,
 ) -> Result<Option<crate::models::RepoOverview>> {
-    // 1. Find the latest scan that has a v2 grade.
+    // 1. Find the latest scan that has a v2 grade (also pull raw_report for LLM narrative,
+    //    scan_tier for which tier was run, and max_unlocked_tier from the repos row).
     let grade_row = sqlx::query(
-        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, r.url AS repo_url
+        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, r.url AS repo_url,
+                  s.raw_report, s.scan_tier, r.max_unlocked_tier
            FROM scan_grades sg
            JOIN scans s  ON s.id  = sg.scan_id
            JOIN repos  r ON r.id  = s.repo_id
@@ -690,15 +740,18 @@ pub async fn get_repo_overview(
         return Ok(None);
     };
 
-    let grade_id: String  = grade_row.get("grade_id");
-    let composite: i64    = grade_row.get("composite");
-    let grade: String     = grade_row.get("grade");
-    let repo_url: String  = grade_row.get("repo_url");
+    let grade_id: String = grade_row.get("grade_id");
+    let composite: i64 = grade_row.get("composite");
+    let grade: String = grade_row.get("grade");
+    let repo_url: String = grade_row.get("repo_url");
+    let raw_report: String = grade_row.get("raw_report");
+    let scan_tier: i64 = grade_row.get("scan_tier");
+    let max_unlocked_tier: i64 = grade_row.get("max_unlocked_tier");
 
-    // 2. Fetch dimension scores + signals for that grade.
+    // 2. Fetch dimension scores + signals for that grade (include tier per signal).
     let dim_rows = sqlx::query(
         r#"SELECT d.id AS dim_id, d.dimension, d.score, d.weight,
-                  s.name, s.passed, s.points, s.detail
+                  s.name, s.passed, s.points, s.detail, s.tier AS signal_tier
            FROM scan_dimension_scores_v2 d
            LEFT JOIN scan_signals s ON s.dimension_score_id = d.id
            WHERE d.scan_grade_id = ?1"#,
@@ -717,38 +770,48 @@ pub async fn get_repo_overview(
         weight: f64,
         passed: i64,
         total: i64,
+        signals: Vec<crate::models::SignalItem>,
     }
 
     let mut dims: HashMap<String, DimAccum> = HashMap::new();
-    let mut all_signals: Vec<crate::models::BlockerItem> = Vec::new();
+    let mut failed_signals: Vec<crate::models::BlockerItem> = Vec::new();
     let mut total_signals: i64 = 0;
     let mut passed_signals: i64 = 0;
 
     for row in &dim_rows {
         let dimension: String = row.get("dimension");
-        let score: i64        = row.get("score");
-        let weight: f64       = row.get("weight");
+        let score: i64 = row.get("score");
+        let weight: f64 = row.get("weight");
         let dim_entry = dims.entry(dimension.clone()).or_insert(DimAccum {
             dimension: dimension.clone(),
             score,
             weight,
             passed: 0,
             total: 0,
+            signals: Vec::new(),
         });
 
         // Signals are LEFT JOINed — a dimension with no signals yields one NULL row.
         if let Ok(name) = row.try_get::<String, _>("name") {
             let passed: bool = row.get::<i64, _>("passed") != 0;
-            let points: i64  = row.get("points");
+            let points: i64 = row.get("points");
             let detail: Option<String> = row.try_get("detail").ok().flatten();
+            let tier: i64 = row.try_get("signal_tier").unwrap_or(1);
 
             dim_entry.total += 1;
             total_signals += 1;
+            dim_entry.signals.push(crate::models::SignalItem {
+                name: name.clone(),
+                passed,
+                points,
+                detail: detail.clone(),
+                tier,
+            });
             if passed {
                 dim_entry.passed += 1;
                 passed_signals += 1;
             } else {
-                all_signals.push(crate::models::BlockerItem {
+                failed_signals.push(crate::models::BlockerItem {
                     signal_name: name,
                     dimension: dimension.clone(),
                     points,
@@ -764,9 +827,35 @@ pub async fn get_repo_overview(
         passed_signals as f64 / total_signals as f64 * 100.0
     };
 
-    let mut top_blockers = all_signals;
+    let mut top_blockers = failed_signals;
     top_blockers.sort_by(|a, b| b.points.cmp(&a.points));
     top_blockers.truncate(5);
+
+    let mut signals_by_dimension: Vec<crate::models::DimensionSignals> = dims
+        .values()
+        .map(|d| crate::models::DimensionSignals {
+            dimension: d.dimension.clone(),
+            score: d.score,
+            weight: d.weight,
+            signals: {
+                let mut sigs = d.signals.clone();
+                // Failed (highest points) first, then passed.
+                sigs.sort_by(|a, b| {
+                    b.passed
+                        .cmp(&a.passed)
+                        .reverse()
+                        .then(b.points.cmp(&a.points))
+                });
+                sigs
+            },
+        })
+        .collect();
+    signals_by_dimension.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .reverse()
+            .then(a.dimension.cmp(&b.dimension))
+    });
 
     let dimensions: Vec<crate::models::DimensionOverview> = dims
         .into_values()
@@ -779,6 +868,56 @@ pub async fn get_repo_overview(
         })
         .collect();
 
+    // 4. Parse LLM report from the raw_report JSON blob.
+    let llm_report: Option<crate::models::LlmReport> =
+        serde_json::from_str::<serde_json::Value>(&raw_report)
+            .ok()
+            .and_then(|v| {
+                Some(crate::models::LlmReport {
+                    summary: v["summary"].as_str()?.to_string(),
+                    language_insights: v["language_insights"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|s| s.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    dependency_recommendations: v["dependency_recommendations"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|s| s.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    dockerfile_findings: v["dockerfile_findings"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|s| s.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    security_violations: v["security_violations"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|s| s.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    general_recommendations: v["general_recommendations"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|s| s.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                })
+            });
+
     Ok(Some(crate::models::RepoOverview {
         repo_id: repo_id.to_string(),
         repo_url,
@@ -787,7 +926,57 @@ pub async fn get_repo_overview(
         confidence,
         dimensions,
         top_blockers,
+        signals_by_dimension,
+        llm_report,
+        scan_tier,
+        max_unlocked_tier,
     }))
+}
+
+// ── Tier management ───────────────────────────────────────────────────────────
+
+/// Return `(repo_id, max_unlocked_tier)` for a repo looked up by URL, or
+/// `None` if the URL has never been seen before.
+pub async fn get_repo_tier_by_url(pool: &Pool, url: &str) -> Result<Option<(String, i64)>> {
+    let row = sqlx::query("SELECT id, max_unlocked_tier FROM repos WHERE url = ?1")
+        .bind(url)
+        .fetch_optional(pool)
+        .await
+        .context("get_repo_tier_by_url")?;
+    Ok(row.map(|r| {
+        (
+            r.get::<String, _>("id"),
+            r.get::<i64, _>("max_unlocked_tier"),
+        )
+    }))
+}
+
+/// Return the current `max_unlocked_tier` for a repo, or `None` if not found.
+pub async fn get_repo_tier(pool: &Pool, repo_id: &str) -> Result<Option<i64>> {
+    let row = sqlx::query("SELECT max_unlocked_tier FROM repos WHERE id = ?1")
+        .bind(repo_id)
+        .fetch_optional(pool)
+        .await
+        .context("get_repo_tier")?;
+    Ok(row.map(|r| r.get::<i64, _>("max_unlocked_tier")))
+}
+
+/// Advance `max_unlocked_tier` for a repo to `new_tier`, but only if
+/// `new_tier` is strictly greater than the current value (never regress).
+///
+/// Call this after a scan completes with all signals in the current tier
+/// passing. Returns `true` if the value was actually updated.
+pub async fn advance_repo_tier(pool: &Pool, repo_id: &str, new_tier: i64) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE repos SET max_unlocked_tier = ?1 \
+         WHERE id = ?2 AND max_unlocked_tier < ?1",
+    )
+    .bind(new_tier)
+    .bind(repo_id)
+    .execute(pool)
+    .await
+    .context("advance_repo_tier")?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Return the trend series for a repo — up to `window` most-recent scan points,

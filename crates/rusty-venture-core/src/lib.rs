@@ -6,7 +6,7 @@ pub mod retry;
 pub mod validator;
 pub mod workflow;
 
-pub use context::ExecutionContext;
+pub use context::{ExecutionContext, LogLine, LogSink};
 pub use dag::{DagEngine, DagNode, DagWorkflow, DagWorkflowBuilder};
 pub use error::CoreError;
 pub use retry::RetryStrategy;

@@ -33,8 +33,13 @@ export interface SimParticle {
 }
 
 export interface ForceOptions {
-    /** Pin the root node at the world origin. Default: true. */
+    /** Pin the root node. Default: true. */
     pinRoot?: boolean
+    /**
+     * World-space position to pin the root at.
+     * Defaults to the origin (0,0,0) when `pinRoot` is true and this is omitted.
+     */
+    pinAt?: { x: number; y: number; z: number }
     /** Coulomb repulsion constant. Default: 30. */
     repulsion?: number
     /** Natural rest length for edge springs. Default: 3.0. */
@@ -43,6 +48,18 @@ export interface ForceOptions {
     springK?: number
     /** Velocity damping factor per step (0-1). Default: 0.85. */
     damping?: number
+    /**
+     * Per-edge override for the spring rest length.
+     * Key format: `"${edge.from}->${edge.to}"`.
+     * Falls back to `springLen` when not present.
+     */
+    edgeLengths?: Map<string, number>
+    /**
+     * Per-particle Y-axis force, keyed by particle id.
+     * Positive = upward pull, negative = downward pull.
+     * Used by gravity mode to make passing signals float and failing ones sink.
+     */
+    scoreForces?: Map<string, number>
 }
 
 export interface RunOptions extends ForceOptions {
@@ -77,10 +94,13 @@ export function stepSimulation(
 ): void {
     const {
         pinRoot = true,
+        pinAt,
         repulsion = 30,
         springLen = 3.0,
         springK = 0.05,
         damping = 0.85,
+        edgeLengths,
+        scoreForces,
     } = options
 
     const n = particles.length
@@ -112,6 +132,14 @@ export function stepSimulation(
         }
     }
 
+    // ── Per-particle score forces (gravity mode) ────────────────────────────
+    if (scoreForces) {
+        for (let i = 0; i < n; i++) {
+            const yf = scoreForces.get(particles[i].id)
+            if (yf !== undefined) forces[i].fy += yf
+        }
+    }
+
     // ── Hooke spring attraction along edges ────────────────────────────────
     for (const edge of edges) {
         const i = idxById.get(edge.from)
@@ -121,7 +149,8 @@ export function stepSimulation(
         const dy = particles[j].y - particles[i].y
         const dz = particles[j].z - particles[i].z
         const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001
-        const f = springK * (d - springLen)
+        const restLen = edgeLengths?.get(`${edge.from}->${edge.to}`) ?? springLen
+        const f = springK * (d - restLen)
         const ux = dx / d, uy = dy / d, uz = dz / d
         forces[i].fx += ux * f; forces[i].fy += uy * f; forces[i].fz += uz * f
         forces[j].fx -= ux * f; forces[j].fy -= uy * f; forces[j].fz -= uz * f
@@ -131,8 +160,8 @@ export function stepSimulation(
     for (let i = 0; i < n; i++) {
         const p = particles[i]
         if (pinRoot && p.kind === 'root') {
-            // Keep root pinned at the world origin
-            p.x = 0; p.y = 0; p.z = 0
+            // Pin root at the specified position (default: world origin)
+            p.x = pinAt?.x ?? 0; p.y = pinAt?.y ?? 0; p.z = pinAt?.z ?? 0
             p.vx = 0; p.vy = 0; p.vz = 0
             continue
         }

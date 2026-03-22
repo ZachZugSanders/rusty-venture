@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::types::{LlmError, LlmRequest, LlmResponse};
+use async_trait::async_trait;
 
 /// Abstraction over any LLM backend.
 /// Implementations provide message-based request/response.

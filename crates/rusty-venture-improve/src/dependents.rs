@@ -77,10 +77,14 @@ impl Action for DiscoverDependentsAction {
         _input: (),
     ) -> Result<DependentRepos, CoreError> {
         let repo_url = ctx.require::<String>(CTX_REPO_URL).await?;
-        let languages: DetectedLanguages =
-            ctx.get::<DetectedLanguages>(CTX_DETECTED_LANGUAGES).await.unwrap_or_default();
-        let deps: DependencyReport =
-            ctx.get::<DependencyReport>(CTX_DEPENDENCY_REPORT).await.unwrap_or_default();
+        let languages: DetectedLanguages = ctx
+            .get::<DetectedLanguages>(CTX_DETECTED_LANGUAGES)
+            .await
+            .unwrap_or_default();
+        let deps: DependencyReport = ctx
+            .get::<DependencyReport>(CTX_DEPENDENCY_REPORT)
+            .await
+            .unwrap_or_default();
 
         // Derive the package name from the manifest / repo URL.
         let package_name = derive_package_name(&repo_url, &deps);
@@ -120,7 +124,10 @@ impl Action for DiscoverDependentsAction {
         };
 
         // ── Org scan: additionally list all repos in the same org ─────────
-        let org = self.org_override.clone().unwrap_or_else(|| infer_org(&repo_url));
+        let org = self
+            .org_override
+            .clone()
+            .unwrap_or_else(|| infer_org(&repo_url));
         let mut org_repos = if !org.is_empty() {
             match self.provider.list_org_repos(&org).await {
                 Ok(r) => r,

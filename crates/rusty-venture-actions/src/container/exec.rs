@@ -1,7 +1,7 @@
+use bollard::container::LogOutput;
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
 use futures::StreamExt;
-use bollard::container::LogOutput;
 use rusty_venture_core::CoreError;
 
 /// A command to execute inside a container.
@@ -77,7 +77,11 @@ pub async fn exec_in_container(
             CreateExecOptions {
                 cmd: Some(cmd.cmd.iter().map(String::as_str).collect()),
                 working_dir: cmd.working_dir.as_deref(),
-                env: if env_refs.is_empty() { None } else { Some(env_refs) },
+                env: if env_refs.is_empty() {
+                    None
+                } else {
+                    Some(env_refs)
+                },
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 ..Default::default()

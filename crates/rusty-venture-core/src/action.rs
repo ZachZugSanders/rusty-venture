@@ -1,6 +1,6 @@
-use std::any::Any;
-use async_trait::async_trait;
 use crate::{context::ExecutionContext, error::CoreError};
+use async_trait::async_trait;
+use std::any::Any;
 
 /// The fundamental unit of work. Every action is async, receives a shared
 /// execution context and its typed input, and produces a typed output.

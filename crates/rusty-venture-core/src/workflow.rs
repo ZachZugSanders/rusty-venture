@@ -27,14 +27,15 @@ pub enum OnFailure {
 }
 
 /// Type-erased validator holder so validators can be stored in a `Vec`.
+#[allow(clippy::type_complexity)]
 pub(crate) struct AnyValidatorBox {
     pub name: String,
     pub validate: Box<
         dyn Fn(
                 &(dyn Any + Send + Sync),
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = ValidationOutcome> + Send>,
-            > + Send
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = ValidationOutcome> + Send>>
+            + Send
             + Sync,
     >,
 }
@@ -136,7 +137,9 @@ where
     }
 
     pub fn build(self) -> Step {
-        let action = self.action.expect("StepBuilder: action() must be called before build()");
+        let action = self
+            .action
+            .expect("StepBuilder: action() must be called before build()");
         let input: Box<dyn Any + Send + Sync> = self
             .input
             .unwrap_or_else(|| Box::new(()) as Box<dyn Any + Send + Sync>);
@@ -193,16 +196,21 @@ impl WorkflowEngine {
         WorkflowEngine
     }
 
-    pub async fn run(
-        &self,
-        workflow: &Workflow,
-        ctx: &ExecutionContext,
-    ) -> Result<(), CoreError> {
+    pub async fn run(&self, workflow: &Workflow, ctx: &ExecutionContext) -> Result<(), CoreError> {
         info!(
             workflow = %workflow.name,
             run_id = %ctx.run_id,
             steps = workflow.steps.len(),
             "Starting workflow"
+        );
+        ctx.emit_log(
+            "info",
+            None,
+            format!(
+                "Starting workflow '{}' — {} steps",
+                workflow.name,
+                workflow.steps.len()
+            ),
         );
 
         for step in &workflow.steps {
@@ -214,6 +222,7 @@ impl WorkflowEngine {
             run_id = %ctx.run_id,
             "Workflow completed successfully"
         );
+        ctx.emit_log("info", None, "Workflow completed successfully");
 
         Ok(())
     }
@@ -243,11 +252,26 @@ pub(crate) async fn execute_step(step: &Step, ctx: &ExecutionContext) -> Result<
                     delay_ms = delay.as_millis(),
                     "Waiting before retry"
                 );
+                ctx.emit_log(
+                    "info",
+                    Some(&step.name),
+                    format!(
+                        "Retrying (attempt {attempt}/{max_attempts}) after {}ms",
+                        delay.as_millis()
+                    ),
+                );
                 tokio::time::sleep(delay).await;
             }
         }
 
         info!(step = %step.name, attempt, max_attempts, "Executing step");
+        if attempt == 1 {
+            ctx.emit_log(
+                "info",
+                Some(&step.name),
+                format!("Starting step '{}'", step.name),
+            );
+        }
 
         // All actions read inputs from ExecutionContext using `()` as Input type.
         let input: Box<dyn Any + Send + Sync> = Box::new(());
@@ -291,11 +315,21 @@ pub(crate) async fn execute_step(step: &Step, ctx: &ExecutionContext) -> Result<
 
                 if !validation_failed {
                     info!(step = %step.name, attempt, "Step succeeded");
+                    ctx.emit_log(
+                        "info",
+                        Some(&step.name),
+                        format!("Step '{}' completed", step.name),
+                    );
                     return Ok(());
                 }
             }
             Err(e) => {
                 warn!(step = %step.name, attempt, error = %e, "Step attempt failed");
+                ctx.emit_log(
+                    "warn",
+                    Some(&step.name),
+                    format!("Step '{}' attempt {attempt} failed: {e}", step.name),
+                );
                 last_error = Some(e);
             }
         }
@@ -311,21 +345,44 @@ pub(crate) async fn execute_step(step: &Step, ctx: &ExecutionContext) -> Result<
     match &step.on_failure {
         OnFailure::Abort => {
             error!(step = %step.name, "Step failed, aborting workflow");
+            ctx.emit_log(
+                "error",
+                Some(&step.name),
+                format!("Step '{}' failed — aborting workflow: {}", step.name, err),
+            );
             Err(step_error)
         }
         OnFailure::Continue => {
             warn!(step = %step.name, "Step failed, continuing workflow");
-            ctx.insert(format!("step_failure.{}", step.name), step_error.to_string()).await;
+            ctx.emit_log(
+                "warn",
+                Some(&step.name),
+                format!("Step '{}' failed (continuing): {}", step.name, err),
+            );
+            ctx.insert(
+                format!("step_failure.{}", step.name),
+                step_error.to_string(),
+            )
+            .await;
             Ok(())
         }
         OnFailure::LlmRemediate { context_prompt } => {
             warn!(step = %step.name, "Step failed, requesting LLM remediation");
+            ctx.emit_log(
+                "warn",
+                Some(&step.name),
+                format!("Step '{}' failed — requesting LLM remediation", step.name),
+            );
             ctx.insert(
                 format!("llm_remediation_prompt.{}", step.name),
                 context_prompt.clone(),
             )
             .await;
-            ctx.insert(format!("step_failure.{}", step.name), step_error.to_string()).await;
+            ctx.insert(
+                format!("step_failure.{}", step.name),
+                step_error.to_string(),
+            )
+            .await;
             Ok(())
         }
     }

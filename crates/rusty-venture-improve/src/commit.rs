@@ -97,10 +97,14 @@ impl Action for CreateBranchAction {
                             branch_name: branch,
                             commit_sha: sha,
                             files_changed: paths,
-                            description: "Governance files: LICENSE, SECURITY.md, CONTRIBUTING.md, etc.".to_string(),
+                            description:
+                                "Governance files: LICENSE, SECURITY.md, CONTRIBUTING.md, etc."
+                                    .to_string(),
                         });
                     }
-                    Err(e) => warn!(branch = %branch, error = %e, "Failed to commit governance branch"),
+                    Err(e) => {
+                        warn!(branch = %branch, error = %e, "Failed to commit governance branch")
+                    }
                 }
             }
         }
@@ -155,7 +159,9 @@ impl Action for CreateBranchAction {
                         ),
                     });
                 }
-                Err(e) => warn!(branch = %branch, error = %e, "Failed to commit containerize branch"),
+                Err(e) => {
+                    warn!(branch = %branch, error = %e, "Failed to commit containerize branch")
+                }
             }
         }
 

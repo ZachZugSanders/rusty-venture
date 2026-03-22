@@ -9,8 +9,8 @@ pub use commit::{CommittedBranch, CreateBranchAction, CTX_COMMITTED_BRANCHES};
 pub use containerize::{ContainerizeAction, ContainerizeResult, CTX_CONTAINERIZE_RESULT};
 pub use dependents::{DependentRepos, DiscoverDependentsAction, CTX_DEPENDENT_REPOS};
 pub use gate::{
-    DependencyDecision, DependencyDecisionGate, DependencyStrategy, CTX_DEPENDENCY_DECISION,
-    CTX_DECISION_PROMPT,
+    DependencyDecision, DependencyDecisionGate, DependencyStrategy, CTX_DECISION_PROMPT,
+    CTX_DEPENDENCY_DECISION,
 };
 pub use governance::{GenerateGovernanceFilesAction, GovernanceFile, CTX_GOVERNANCE_FILES};
 pub use workflow::ImprovementWorkflowBuilder;

@@ -6,8 +6,8 @@ use rusty_venture_core::{action::Action, context::ExecutionContext, CoreError};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::container::{exec_in_container, ExecCommand, CTX_CONTAINER_ID, CTX_DOCKER_CLIENT};
 use super::clone::CTX_REPO_LOCAL_PATH;
+use crate::container::{exec_in_container, ExecCommand, CTX_CONTAINER_ID, CTX_DOCKER_CLIENT};
 
 pub const CTX_DETECTED_LANGUAGES: &str = "repo.detected_languages";
 
@@ -89,7 +89,11 @@ impl Action for DetectLanguageAction {
         "detect-language"
     }
 
-    async fn execute(&self, ctx: &ExecutionContext, _input: ()) -> Result<DetectedLanguages, CoreError> {
+    async fn execute(
+        &self,
+        ctx: &ExecutionContext,
+        _input: (),
+    ) -> Result<DetectedLanguages, CoreError> {
         let container_id: String = ctx.require::<String>(CTX_CONTAINER_ID).await?;
         let docker: Arc<Docker> = ctx.require::<Arc<Docker>>(CTX_DOCKER_CLIENT).await?;
         let repo_path: String = ctx.require::<String>(CTX_REPO_LOCAL_PATH).await?;
@@ -98,8 +102,17 @@ impl Action for DetectLanguageAction {
         let result = exec_in_container(
             &docker,
             &container_id,
-            ExecCommand::new(["find", &repo_path, "-maxdepth", "3", "-type", "f", "-printf", "%f\n"])
-                .working_dir(&repo_path),
+            ExecCommand::new([
+                "find",
+                &repo_path,
+                "-maxdepth",
+                "3",
+                "-type",
+                "f",
+                "-printf",
+                "%f\n",
+            ])
+            .working_dir(&repo_path),
         )
         .await?;
 
@@ -109,8 +122,7 @@ impl Action for DetectLanguageAction {
         let root_result = exec_in_container(
             &docker,
             &container_id,
-            ExecCommand::new(["ls", "-1", &repo_path])
-                .working_dir(&repo_path),
+            ExecCommand::new(["ls", "-1", &repo_path]).working_dir(&repo_path),
         )
         .await?;
 

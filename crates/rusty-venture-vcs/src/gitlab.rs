@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::{
-    provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoRef, RepoProvider},
+    provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoProvider, RepoRef},
     VcsError,
 };
 
@@ -37,7 +37,9 @@ impl RepoProvider for GitlabProvider {
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<RemoteRepo>, VcsError> {
-        Err(VcsError::NotImplemented("GitLab list_org_repos".to_string()))
+        Err(VcsError::NotImplemented(
+            "GitLab list_org_repos".to_string(),
+        ))
     }
 
     async fn search_code(

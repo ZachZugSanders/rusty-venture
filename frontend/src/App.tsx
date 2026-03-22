@@ -1,11 +1,9 @@
 import { useState } from 'react'
 import ReposView from './views/ReposView'
-import HistoryView from './views/HistoryView'
-import AnalyzeView from './views/AnalyzeView'
-import DecisionGraphView from './views/DecisionGraphView'
+import MaturityGraphView from './views/MaturityGraphView'
 import styles from './App.module.css'
 
-type Tab = 'repos' | 'analyze' | 'history' | 'graph'
+type Tab = 'repos' | 'graph'
 
 const NAV: { id: Tab; label: string; icon: JSX.Element }[] = [
     {
@@ -18,26 +16,8 @@ const NAV: { id: Tab; label: string; icon: JSX.Element }[] = [
         ),
     },
     {
-        id: 'analyze',
-        label: 'Analyze',
-        icon: (
-            <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
-                <path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z" />
-            </svg>
-        ),
-    },
-    {
-        id: 'history',
-        label: 'Scan History',
-        icon: (
-            <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
-                <path d="M1.643 3.143.427 1.927A.25.25 0 0 0 0 2.104V5.75c0 .138.112.25.25.25h3.646a.25.25 0 0 0 .177-.427L2.715 4.215a6.5 6.5 0 1 1-1.18 4.458.75.75 0 1 0-1.493.154 8.001 8.001 0 1 0 1.6-5.684ZM7.75 4a.75.75 0 0 1 .75.75v2.992l2.028.812a.75.75 0 0 1-.557 1.392l-2.5-1A.751.751 0 0 1 7 8.25v-3.5A.75.75 0 0 1 7.75 4Z" />
-            </svg>
-        ),
-    },
-    {
         id: 'graph',
-        label: 'Decision Graph',
+        label: 'Maturity Graph',
         icon: (
             <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
                 <path d="M7.5 1.75a.75.75 0 0 1 1.5 0v.581a6.003 6.003 0 0 1 4.688 5.168H14.5a.75.75 0 0 1 0 1.5h-.813a6.003 6.003 0 0 1-4.687 5.168V14.5a.75.75 0 0 1-1.5 0v-.833A6.003 6.003 0 0 1 2.813 9H2a.75.75 0 0 1 0-1.5h.813A6.003 6.003 0 0 1 7.5 2.331ZM8 3.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Zm0 2a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
@@ -76,9 +56,7 @@ export default function App() {
 
             <main className={styles.main}>
                 {tab === 'repos' && <ReposView />}
-                {tab === 'analyze' && <AnalyzeView />}
-                {tab === 'history' && <HistoryView />}
-                {tab === 'graph' && <DecisionGraphView />}
+                {tab === 'graph' && <MaturityGraphView />}
             </main>
         </div>
     )

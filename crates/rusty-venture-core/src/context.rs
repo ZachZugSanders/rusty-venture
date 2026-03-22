@@ -6,6 +6,19 @@ use uuid::Uuid;
 
 use crate::error::CoreError;
 
+/// A single structured log line emitted during workflow execution.
+#[derive(Debug, Clone)]
+pub struct LogLine {
+    pub level: &'static str,
+    /// The step name that emitted this line, if any.
+    pub step: Option<String>,
+    pub message: String,
+}
+
+/// Sink for workflow log lines. Callers inject this into `ExecutionContext`
+/// to receive structured events in real time (e.g. for SSE streaming).
+pub type LogSink = tokio::sync::mpsc::UnboundedSender<LogLine>;
+
 /// A typed heterogeneous key-value store shared across all steps in a workflow.
 /// Steps communicate by inserting and reading named values via string keys.
 /// Access is guarded by an async RwLock.
@@ -14,6 +27,9 @@ pub struct ExecutionContext {
     store: Arc<RwLock<HashMap<String, Box<dyn Any + Send + Sync>>>>,
     pub run_id: Uuid,
     pub workflow_name: String,
+    /// Optional sink for structured log lines. When set, workflow steps emit
+    /// events here so callers can stream progress to clients (e.g. SSE).
+    pub log_sink: Option<LogSink>,
 }
 
 impl ExecutionContext {
@@ -22,15 +38,24 @@ impl ExecutionContext {
             store: Arc::new(RwLock::new(HashMap::new())),
             run_id: Uuid::new_v4(),
             workflow_name: workflow_name.into(),
+            log_sink: None,
+        }
+    }
+
+    /// Emit a structured log line to the injected sink, if any.
+    /// This is a synchronous call (unbounded mpsc send never blocks).
+    pub fn emit_log(&self, level: &'static str, step: Option<&str>, message: impl Into<String>) {
+        if let Some(ref tx) = self.log_sink {
+            let _ = tx.send(LogLine {
+                level,
+                step: step.map(|s| s.to_string()),
+                message: message.into(),
+            });
         }
     }
 
     /// Insert a typed value under a string key, overwriting any previous value.
-    pub async fn insert<T: Any + Send + Sync + 'static>(
-        &self,
-        key: impl Into<String>,
-        value: T,
-    ) {
+    pub async fn insert<T: Any + Send + Sync + 'static>(&self, key: impl Into<String>, value: T) {
         let mut store = self.store.write().await;
         store.insert(key.into(), Box::new(value));
     }
@@ -39,10 +64,7 @@ impl ExecutionContext {
     /// the stored type does not match `T`.
     pub async fn get<T: Any + Send + Sync + Clone + 'static>(&self, key: &str) -> Option<T> {
         let store = self.store.read().await;
-        store
-            .get(key)
-            .and_then(|v| v.downcast_ref::<T>())
-            .cloned()
+        store.get(key).and_then(|v| v.downcast_ref::<T>()).cloned()
     }
 
     /// Like `get` but returns an error if the key is absent or type mismatches.
@@ -50,9 +72,11 @@ impl ExecutionContext {
         &self,
         key: &str,
     ) -> Result<T, CoreError> {
-        self.get::<T>(key).await.ok_or_else(|| CoreError::ContextKeyNotFound {
-            key: key.to_string(),
-        })
+        self.get::<T>(key)
+            .await
+            .ok_or_else(|| CoreError::ContextKeyNotFound {
+                key: key.to_string(),
+            })
     }
 }
 

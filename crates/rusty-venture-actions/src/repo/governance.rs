@@ -80,8 +80,8 @@ impl Action for GovernanceCheckAction {
         ctx: &ExecutionContext,
         _input: (),
     ) -> Result<GovernanceReport, CoreError> {
-        use std::sync::Arc;
         use bollard::Docker;
+        use std::sync::Arc;
 
         let docker: Arc<Docker> = ctx.require::<Arc<Docker>>(CTX_DOCKER_CLIENT).await?;
         let container_id: String = ctx.require::<String>(CTX_CONTAINER_ID).await?;
@@ -350,8 +350,13 @@ pub fn detect_governance_local(path: &std::path::Path) -> GovernanceReport {
     let has_dir = |name: &str| path.join(name).is_dir();
 
     let has_license = has_any(&[
-        "LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE",
-        "LICENSE-MIT", "LICENSE-APACHE", "COPYING",
+        "LICENSE",
+        "LICENSE.md",
+        "LICENSE.txt",
+        "LICENCE",
+        "LICENSE-MIT",
+        "LICENSE-APACHE",
+        "COPYING",
     ]);
 
     GovernanceReport {
@@ -361,7 +366,10 @@ pub fn detect_governance_local(path: &std::path::Path) -> GovernanceReport {
         has_changelog: has_any(&["CHANGELOG.md", "CHANGELOG.txt", "CHANGES.md", "HISTORY.md"]),
         has_contributing: has_any(&["CONTRIBUTING.md", "CONTRIBUTING.txt", "CONTRIBUTING.rst"]),
         has_security_policy: has_any(&[
-            "SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md", "SECURITY.txt",
+            "SECURITY.md",
+            ".github/SECURITY.md",
+            "docs/SECURITY.md",
+            "SECURITY.txt",
         ]),
         has_code_of_conduct: has_any(&["CODE_OF_CONDUCT.md", "CODE_OF_CONDUCT.rst"]),
         has_ci_config: has_dir(".github/workflows")
@@ -373,20 +381,41 @@ pub fn detect_governance_local(path: &std::path::Path) -> GovernanceReport {
         has_dependabot: has(".github/dependabot.yml") || has(".github/dependabot.yaml"),
         has_renovate: has("renovate.json") || has("renovate.json5") || has(".renovaterc"),
         has_any_lock_file: has_any(&[
-            "Cargo.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
-            "go.sum", "poetry.lock", "uv.lock", "Pipfile.lock", "Gemfile.lock",
+            "Cargo.lock",
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "go.sum",
+            "poetry.lock",
+            "uv.lock",
+            "Pipfile.lock",
+            "Gemfile.lock",
             "composer.lock",
         ]),
         has_lint_config: has_any(&[
-            "clippy.toml", ".clippy.toml",
-            ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", "eslint.config.js",
-            "ruff.toml", ".ruff.toml", ".flake8",
-            ".golangci.yml", ".golangci.yaml",
-            "pylintrc", ".pylintrc",
-            "biome.json", "oxlintrc.json",
+            "clippy.toml",
+            ".clippy.toml",
+            ".eslintrc.js",
+            ".eslintrc.cjs",
+            ".eslintrc.json",
+            "eslint.config.js",
+            "ruff.toml",
+            ".ruff.toml",
+            ".flake8",
+            ".golangci.yml",
+            ".golangci.yaml",
+            "pylintrc",
+            ".pylintrc",
+            "biome.json",
+            "oxlintrc.json",
         ]),
         has_pre_commit: has(".pre-commit-config.yaml") || has_dir(".husky") || has("lefthook.yml"),
-        has_safety_config: has_any(&["deny.toml", ".cargo/audit.toml", "mypy.ini", "tsconfig.json"]),
+        has_safety_config: has_any(&[
+            "deny.toml",
+            ".cargo/audit.toml",
+            "mypy.ini",
+            "tsconfig.json",
+        ]),
         has_test_files: has_dir("tests")
             || has_dir("test")
             || has_dir("spec")

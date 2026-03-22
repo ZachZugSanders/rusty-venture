@@ -1,0 +1,29 @@
+# Runner image for Tier 3 active functional validation.
+# Pre-built so there is zero pull/install time when the backend spawns it.
+# Network IS enabled at container runtime so package managers can fetch
+# dependencies before building and running tests.
+#
+# Base: rust:slim-bookworm ships Rust + cargo pre-installed.
+# We add Node.js, Python 3, and Go on top for multi-language support.
+FROM rust:1-slim-bookworm
+
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends \
+       # Shared build tools
+       ca-certificates git curl build-essential pkg-config libssl-dev \
+       # Python 3
+       python3 python3-pip python3-venv \
+       # Node.js (Debian bookworm ships Node 18)
+       nodejs npm \
+       # Go (bookworm ships Go 1.19 — adequate for syntax/build checks)
+       golang-go \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ruff (Python linter) via pip so it is available globally
+RUN pip3 install --no-cache-dir --break-system-packages ruff
+
+# Warm the cargo registry index so first builds are faster
+# (this pulls only the index metadata, not crate tarballs)
+RUN cargo search --limit 0 2>/dev/null || true
+
+WORKDIR /workspace/repo

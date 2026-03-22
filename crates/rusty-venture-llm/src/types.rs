@@ -18,11 +18,17 @@ pub struct Message {
 
 impl Message {
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: Role::User, content: content.into() }
+        Self {
+            role: Role::User,
+            content: content.into(),
+        }
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: content.into() }
+        Self {
+            role: Role::Assistant,
+            content: content.into(),
+        }
     }
 }
 
@@ -51,9 +57,12 @@ pub struct LlmResponse {
 impl LlmResponse {
     /// Extract the text content from the first text block.
     pub fn text(&self) -> Option<&str> {
-        self.content.iter().find_map(|b| match b {
-            ContentBlock::Text { text } => Some(text.as_str()),
-        })
+        self.content
+            .iter()
+            .map(|b| match b {
+                ContentBlock::Text { text } => text.as_str(),
+            })
+            .next()
     }
 
     /// Like `text()` but returns an empty string if no text block exists.

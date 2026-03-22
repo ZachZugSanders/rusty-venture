@@ -35,6 +35,7 @@ function makeNode(
         has_detail: false,
         passed: true,
         highlight: false,
+        tier: 1,
     }
 }
 

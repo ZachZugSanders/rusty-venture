@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::error::CoreError;
+use async_trait::async_trait;
 
 /// The outcome of a validation check on a step's output.
 #[derive(Debug)]
@@ -46,7 +46,9 @@ pub struct NonEmptyValidator {
 
 impl NonEmptyValidator {
     pub fn new(field_name: impl Into<String>) -> Self {
-        Self { field_name: field_name.into() }
+        Self {
+            field_name: field_name.into(),
+        }
     }
 }
 

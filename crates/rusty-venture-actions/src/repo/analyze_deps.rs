@@ -6,9 +6,9 @@ use rusty_venture_core::{action::Action, context::ExecutionContext, CoreError};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::container::{exec_in_container, ExecCommand, CTX_CONTAINER_ID, CTX_DOCKER_CLIENT};
 use super::clone::CTX_REPO_LOCAL_PATH;
-use super::detect_language::{CTX_DETECTED_LANGUAGES, DetectedLanguages, Language};
+use super::detect_language::{DetectedLanguages, Language, CTX_DETECTED_LANGUAGES};
+use crate::container::{exec_in_container, ExecCommand, CTX_CONTAINER_ID, CTX_DOCKER_CLIENT};
 
 pub const CTX_DEPENDENCY_REPORT: &str = "repo.dependency_report";
 
@@ -54,11 +54,17 @@ impl Action for AnalyzeDepsAction {
         "analyze-deps"
     }
 
-    async fn execute(&self, ctx: &ExecutionContext, _input: ()) -> Result<DependencyReport, CoreError> {
+    async fn execute(
+        &self,
+        ctx: &ExecutionContext,
+        _input: (),
+    ) -> Result<DependencyReport, CoreError> {
         let container_id: String = ctx.require::<String>(CTX_CONTAINER_ID).await?;
         let docker: Arc<Docker> = ctx.require::<Arc<Docker>>(CTX_DOCKER_CLIENT).await?;
         let repo_path: String = ctx.require::<String>(CTX_REPO_LOCAL_PATH).await?;
-        let detected: DetectedLanguages = ctx.require::<DetectedLanguages>(CTX_DETECTED_LANGUAGES).await?;
+        let detected: DetectedLanguages = ctx
+            .require::<DetectedLanguages>(CTX_DETECTED_LANGUAGES)
+            .await?;
 
         info!(language = %detected.primary, "Analyzing dependencies");
 
@@ -84,20 +90,26 @@ impl Action for AnalyzeDepsAction {
     }
 }
 
-async fn analyze_rust(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_rust(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     // Check for Cargo.lock
     let lock_check = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["test", "-f", &format!("{repo_path}/Cargo.lock")]),
-    ).await?;
+    )
+    .await?;
 
     // Read Cargo.toml for a quick dep list
     let toml_read = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/Cargo.toml")]),
-    ).await?;
+    )
+    .await?;
 
     Ok(DependencyReport {
         language: Language::Rust,
@@ -114,7 +126,10 @@ fn parse_cargo_toml_deps(toml: &str) -> Vec<Dependency> {
 
     for line in toml.lines() {
         let trimmed = line.trim();
-        if trimmed == "[dependencies]" || trimmed == "[dev-dependencies]" || trimmed == "[build-dependencies]" {
+        if trimmed == "[dependencies]"
+            || trimmed == "[dev-dependencies]"
+            || trimmed == "[build-dependencies]"
+        {
             in_deps_section = true;
             continue;
         }
@@ -142,7 +157,11 @@ fn parse_cargo_toml_deps(toml: &str) -> Vec<Dependency> {
     deps
 }
 
-async fn analyze_node(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_node(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     let lock_check = exec_in_container(
         docker,
         container_id,
@@ -155,7 +174,8 @@ async fn analyze_node(docker: &Docker, container_id: &str, repo_path: &str) -> R
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/package.json")]),
-    ).await?;
+    )
+    .await?;
 
     let deps = parse_package_json_deps(&pkg_read.stdout);
 
@@ -189,13 +209,18 @@ fn parse_package_json_deps(json: &str) -> Vec<Dependency> {
     deps
 }
 
-async fn analyze_python(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_python(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     // Try pyproject.toml first, then requirements.txt
     let pyproject = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/pyproject.toml")]),
-    ).await?;
+    )
+    .await?;
 
     let (manifest_file, raw_output) = if pyproject.is_success() {
         ("pyproject.toml".to_string(), pyproject.stdout)
@@ -204,7 +229,8 @@ async fn analyze_python(docker: &Docker, container_id: &str, repo_path: &str) ->
             docker,
             container_id,
             ExecCommand::new(["cat", &format!("{repo_path}/requirements.txt")]),
-        ).await?;
+        )
+        .await?;
         ("requirements.txt".to_string(), req.stdout)
     };
 
@@ -212,19 +238,31 @@ async fn analyze_python(docker: &Docker, container_id: &str, repo_path: &str) ->
         docker,
         container_id,
         ExecCommand::new(["test", "-f", &format!("{repo_path}/poetry.lock")]),
-    ).await?;
+    )
+    .await?;
 
-    let deps = raw_output.lines()
+    let deps = raw_output
+        .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
         .map(|l| {
             let (name, version) = if let Some(pos) = l.find("==") {
-                (l[..pos].trim().to_string(), Some(l[pos + 2..].trim().to_string()))
+                (
+                    l[..pos].trim().to_string(),
+                    Some(l[pos + 2..].trim().to_string()),
+                )
             } else if let Some(pos) = l.find(">=") {
-                (l[..pos].trim().to_string(), Some(format!(">={}", &l[pos + 2..])))
+                (
+                    l[..pos].trim().to_string(),
+                    Some(format!(">={}", &l[pos + 2..])),
+                )
             } else {
                 (l.trim().to_string(), None)
             };
-            Dependency { name, version, kind: DependencyKind::Runtime }
+            Dependency {
+                name,
+                version,
+                kind: DependencyKind::Runtime,
+            }
         })
         .collect();
 
@@ -237,20 +275,28 @@ async fn analyze_python(docker: &Docker, container_id: &str, repo_path: &str) ->
     })
 }
 
-async fn analyze_go(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_go(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     let go_mod = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/go.mod")]),
-    ).await?;
+    )
+    .await?;
 
     let lock_check = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["test", "-f", &format!("{repo_path}/go.sum")]),
-    ).await?;
+    )
+    .await?;
 
-    let deps = go_mod.stdout.lines()
+    let deps = go_mod
+        .stdout
+        .lines()
         .skip_while(|l| !l.trim().starts_with("require"))
         .skip(1)
         .filter(|l| !l.trim().is_empty() && !l.trim().starts_with(')'))
@@ -273,12 +319,17 @@ async fn analyze_go(docker: &Docker, container_id: &str, repo_path: &str) -> Res
     })
 }
 
-async fn analyze_java(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_java(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     let pom = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/pom.xml")]),
-    ).await?;
+    )
+    .await?;
 
     Ok(DependencyReport {
         language: Language::Java,
@@ -289,26 +340,46 @@ async fn analyze_java(docker: &Docker, container_id: &str, repo_path: &str) -> R
     })
 }
 
-async fn analyze_ruby(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_ruby(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     let gemfile = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/Gemfile")]),
-    ).await?;
+    )
+    .await?;
 
     let lock_check = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["test", "-f", &format!("{repo_path}/Gemfile.lock")]),
-    ).await?;
+    )
+    .await?;
 
-    let deps = gemfile.stdout.lines()
+    let deps = gemfile
+        .stdout
+        .lines()
         .filter(|l| l.trim().starts_with("gem "))
         .map(|l| {
             let parts: Vec<&str> = l.trim().splitn(3, ',').collect();
-            let name = parts.first().unwrap_or(&"").trim_start_matches("gem ").trim_matches('\'').trim_matches('"').to_string();
-            let version = parts.get(1).map(|v| v.trim().trim_matches('\'').trim_matches('"').to_string());
-            Dependency { name, version, kind: DependencyKind::Runtime }
+            let name = parts
+                .first()
+                .unwrap_or(&"")
+                .trim_start_matches("gem ")
+                .trim_matches('\'')
+                .trim_matches('"')
+                .to_string();
+            let version = parts
+                .get(1)
+                .map(|v| v.trim().trim_matches('\'').trim_matches('"').to_string());
+            Dependency {
+                name,
+                version,
+                kind: DependencyKind::Runtime,
+            }
         })
         .collect();
 
@@ -321,18 +392,24 @@ async fn analyze_ruby(docker: &Docker, container_id: &str, repo_path: &str) -> R
     })
 }
 
-async fn analyze_php(docker: &Docker, container_id: &str, repo_path: &str) -> Result<DependencyReport, CoreError> {
+async fn analyze_php(
+    docker: &Docker,
+    container_id: &str,
+    repo_path: &str,
+) -> Result<DependencyReport, CoreError> {
     let composer = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["cat", &format!("{repo_path}/composer.json")]),
-    ).await?;
+    )
+    .await?;
 
     let lock_check = exec_in_container(
         docker,
         container_id,
         ExecCommand::new(["test", "-f", &format!("{repo_path}/composer.lock")]),
-    ).await?;
+    )
+    .await?;
 
     let deps = if let Ok(val) = serde_json::from_str::<serde_json::Value>(&composer.stdout) {
         let mut d = vec![];

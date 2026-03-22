@@ -6,8 +6,8 @@ use rusty_venture_core::{action::Action, context::ExecutionContext, CoreError};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-use crate::container::{exec_in_container, ExecCommand, CTX_CONTAINER_ID, CTX_DOCKER_CLIENT};
 use super::clone::CTX_REPO_LOCAL_PATH;
+use crate::container::{exec_in_container, ExecCommand, CTX_CONTAINER_ID, CTX_DOCKER_CLIENT};
 
 pub const CTX_DOCKERFILE_REPORT: &str = "repo.dockerfile_report";
 
@@ -44,7 +44,7 @@ impl std::fmt::Display for DockerfileKind {
 }
 
 /// The aggregated result of scanning for Docker-related files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DockerfileReport {
     pub entries: Vec<DockerfileEntry>,
     pub has_root_dockerfile: bool,
@@ -66,7 +66,11 @@ impl Action for FindDockerfilesAction {
         "find-dockerfiles"
     }
 
-    async fn execute(&self, ctx: &ExecutionContext, _input: ()) -> Result<DockerfileReport, CoreError> {
+    async fn execute(
+        &self,
+        ctx: &ExecutionContext,
+        _input: (),
+    ) -> Result<DockerfileReport, CoreError> {
         let container_id: String = ctx.require::<String>(CTX_CONTAINER_ID).await?;
         let docker: Arc<Docker> = ctx.require::<Arc<Docker>>(CTX_DOCKER_CLIENT).await?;
         let repo_path: String = ctx.require::<String>(CTX_REPO_LOCAL_PATH).await?;
@@ -76,20 +80,41 @@ impl Action for FindDockerfilesAction {
             &docker,
             &container_id,
             ExecCommand::new([
-                "find", &repo_path,
-                "-type", "f",
-                "(", "-name", "Dockerfile", "-o",
-                      "-name", "Dockerfile.*",
-                      "-o", "-name", "*.dockerfile",
-                      "-o", "-name", "docker-compose.yml",
-                      "-o", "-name", "docker-compose.yaml",
-                      "-o", "-name", "docker-compose.*.yml",
-                      "-o", "-name", "docker-compose.*.yaml",
-                      "-o", "-name", ".dockerignore",
+                "find",
+                &repo_path,
+                "-type",
+                "f",
+                "(",
+                "-name",
+                "Dockerfile",
+                "-o",
+                "-name",
+                "Dockerfile.*",
+                "-o",
+                "-name",
+                "*.dockerfile",
+                "-o",
+                "-name",
+                "docker-compose.yml",
+                "-o",
+                "-name",
+                "docker-compose.yaml",
+                "-o",
+                "-name",
+                "docker-compose.*.yml",
+                "-o",
+                "-name",
+                "docker-compose.*.yaml",
+                "-o",
+                "-name",
+                ".dockerignore",
                 ")",
-                "-not", "-path", "*/\\.git/*",
+                "-not",
+                "-path",
+                "*/\\.git/*",
             ]),
-        ).await?;
+        )
+        .await?;
 
         let mut entries = vec![];
 
@@ -116,11 +141,8 @@ impl Action for FindDockerfilesAction {
             };
 
             // Read the file and check for common warnings
-            let file_content = exec_in_container(
-                &docker,
-                &container_id,
-                ExecCommand::new(["cat", path]),
-            ).await?;
+            let file_content =
+                exec_in_container(&docker, &container_id, ExecCommand::new(["cat", path])).await?;
 
             let warnings = check_dockerfile_warnings(&file_content.stdout, &kind);
 
@@ -132,9 +154,15 @@ impl Action for FindDockerfilesAction {
             });
         }
 
-        let has_root_dockerfile = entries.iter().any(|e| e.kind == DockerfileKind::Dockerfile && !e.is_nested);
-        let has_root_compose = entries.iter().any(|e| e.kind == DockerfileKind::DockerCompose && !e.is_nested);
-        let has_dockerignore = entries.iter().any(|e| e.kind == DockerfileKind::DockerIgnore);
+        let has_root_dockerfile = entries
+            .iter()
+            .any(|e| e.kind == DockerfileKind::Dockerfile && !e.is_nested);
+        let has_root_compose = entries
+            .iter()
+            .any(|e| e.kind == DockerfileKind::DockerCompose && !e.is_nested);
+        let has_dockerignore = entries
+            .iter()
+            .any(|e| e.kind == DockerfileKind::DockerIgnore);
         let nested_count = entries.iter().filter(|e| e.is_nested).count();
 
         info!(
@@ -166,16 +194,27 @@ fn check_dockerfile_warnings(content: &str, kind: &DockerfileKind) -> Vec<String
             for line in content.lines() {
                 let upper = line.trim().to_uppercase();
                 if upper.starts_with("FROM") && upper.contains(":LATEST") {
-                    warnings.push("Uses ':latest' tag — unpredictable builds. Pin to a specific version.".to_string());
+                    warnings.push(
+                        "Uses ':latest' tag — unpredictable builds. Pin to a specific version."
+                            .to_string(),
+                    );
                 }
                 if upper.starts_with("FROM") && upper == "FROM SCRATCH" {
                     // Fine, no warning
                 }
-                if upper.contains("PASSWORD") || upper.contains("SECRET") || upper.contains("API_KEY") {
-                    warnings.push("Possible hardcoded secret in ENV or ARG instruction.".to_string());
+                if upper.contains("PASSWORD")
+                    || upper.contains("SECRET")
+                    || upper.contains("API_KEY")
+                {
+                    warnings
+                        .push("Possible hardcoded secret in ENV or ARG instruction.".to_string());
                 }
-                if upper.starts_with("USER ROOT") || (upper.starts_with("USER") && upper.ends_with("ROOT")) {
-                    warnings.push("Container runs as root. Consider adding a non-root USER.".to_string());
+                if upper.starts_with("USER ROOT")
+                    || (upper.starts_with("USER") && upper.ends_with("ROOT"))
+                {
+                    warnings.push(
+                        "Container runs as root. Consider adding a non-root USER.".to_string(),
+                    );
                 }
             }
             if !content.to_uppercase().contains("HEALTHCHECK") {
@@ -187,7 +226,9 @@ fn check_dockerfile_warnings(content: &str, kind: &DockerfileKind) -> Vec<String
                 warnings.push("Service runs with 'privileged: true' — security risk.".to_string());
             }
             if content.contains(":latest") {
-                warnings.push("Service image uses ':latest' tag — unpredictable deployments.".to_string());
+                warnings.push(
+                    "Service image uses ':latest' tag — unpredictable deployments.".to_string(),
+                );
             }
         }
         _ => {}

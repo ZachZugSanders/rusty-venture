@@ -85,6 +85,8 @@ impl Default for NodeSizeConfig {
     }
 }
 
+fn default_tier() -> u8 { 1 }
+
 // ── Public types ─────────────────────────────────────────────────────────────
 
 /// A node in the decision graph.
@@ -124,9 +126,15 @@ pub struct GraphNode {
     pub passed: bool,
     /// Whether this node should be highlighted (failed signal or
     /// below-threshold dimension).
-    pub highlight: bool,    /// Whether this signal node carries an actionable `detail` string.
+    pub highlight: bool,
+    /// Whether this signal node carries an actionable `detail` string.
     /// Always `false` for root and dimension nodes.
-    pub has_detail: bool,}
+    pub has_detail: bool,
+    /// Maturity scan tier this node belongs to (1/2/3).
+    /// Always `1` for root and dimension nodes.
+    #[serde(default = "default_tier")]
+    pub tier: u8,
+}
 
 /// A directed edge from parent to child.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -217,6 +225,7 @@ impl DecisionGraph {
             passed: true,
             highlight: false,
             has_detail: false,
+            tier: 1,
         });
 
         // ── Dimension and signal nodes ───────────────────────────────────────
@@ -249,6 +258,7 @@ impl DecisionGraph {
                 passed: dim_passed,
                 highlight: !dim_passed,
                 has_detail: false,
+                tier: 1,
             });
 
             edges.push(GraphEdge {
@@ -280,10 +290,13 @@ impl DecisionGraph {
                 let sig_py = effective_orbit_l2 * sig_angle.sin();
                 let sig_pz = dim_pz + effective_orbit_l2 * sig_angle.cos() * tang_z;
 
-                let sig_radius =
-                    config.sig_base_radius
+                let sig_radius = config.sig_base_radius
                     + sig.points as f32 * config.sig_points_scale
-                    + if has_detail { config.sig_detail_boost } else { 0.0 };
+                    + if has_detail {
+                        config.sig_detail_boost
+                    } else {
+                        0.0
+                    };
 
                 nodes.push(GraphNode {
                     id: sid.clone(),
@@ -300,6 +313,7 @@ impl DecisionGraph {
                     passed: sig.passed,
                     highlight: !sig.passed,
                     has_detail,
+                    tier: sig.tier,
                 });
 
                 edges.push(GraphEdge {
@@ -318,7 +332,11 @@ impl DecisionGraph {
             "DecisionGraph built"
         );
 
-        Self { nodes, edges, config }
+        Self {
+            nodes,
+            edges,
+            config,
+        }
     }
 }
 
@@ -327,7 +345,9 @@ impl DecisionGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repo::maturity::{DimensionScore, MaturityDimension, MaturityGrade, MaturityScore, MaturitySignal};
+    use crate::repo::maturity::{
+        DimensionScore, MaturityDimension, MaturityGrade, MaturityScore, MaturitySignal,
+    };
 
     fn make_signal(name: &str, passed: bool, points: u8) -> MaturitySignal {
         MaturitySignal {
@@ -335,7 +355,12 @@ mod tests {
             description: format!("{name} description"),
             passed,
             points,
-            detail: if passed { None } else { Some(format!("{name} failed")) },
+            detail: if passed {
+                None
+            } else {
+                Some(format!("{name} failed"))
+            },
+            tier: 1,
         }
     }
 
@@ -391,11 +416,17 @@ mod tests {
     fn signal_node_ids_are_deterministic() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
         assert!(
-            graph.nodes.iter().any(|n| n.id == "sig:Security:no_critical_cves"),
+            graph
+                .nodes
+                .iter()
+                .any(|n| n.id == "sig:Security:no_critical_cves"),
             "signal node id must be 'sig:<dim>:<name>'"
         );
         assert!(
-            graph.nodes.iter().any(|n| n.id == "sig:Security:has_security_policy"),
+            graph
+                .nodes
+                .iter()
+                .any(|n| n.id == "sig:Security:has_security_policy"),
             "second signal in Security must be present"
         );
     }
@@ -411,7 +442,10 @@ mod tests {
             .filter(|e| e.from == "root")
             .map(|e| e.to.as_str())
             .collect();
-        assert!(root_targets.contains(&"dim:Security"), "no root→dim:Security edge");
+        assert!(
+            root_targets.contains(&"dim:Security"),
+            "no root→dim:Security edge"
+        );
         assert!(
             root_targets.contains(&"dim:Project Governance"),
             "no root→dim:Project Governance edge"
@@ -441,7 +475,11 @@ mod tests {
     fn total_edges_equals_dimensions_plus_all_signals() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
         // 2 root→dim edges + 2 signals in Security + 2 signals in Governance = 6
-        assert_eq!(graph.edges.len(), 6, "expected 6 edges (2 root→dim + 4 dim→sig)");
+        assert_eq!(
+            graph.edges.len(),
+            6,
+            "expected 6 edges (2 root→dim + 4 dim→sig)"
+        );
     }
 
     // ── Semantic metadata ────────────────────────────────────────────────────
@@ -479,8 +517,14 @@ mod tests {
             .iter()
             .find(|n| n.id == "sig:Security:no_critical_cves")
             .unwrap();
-        assert_eq!(sig.score, 40.0, "passing signal score must equal its points");
-        assert_eq!(sig.max_points, 40.0, "signal max_points must equal its points");
+        assert_eq!(
+            sig.score, 40.0,
+            "passing signal score must equal its points"
+        );
+        assert_eq!(
+            sig.max_points, 40.0,
+            "signal max_points must equal its points"
+        );
     }
 
     #[test]
@@ -492,7 +536,10 @@ mod tests {
             .find(|n| n.id == "sig:Security:has_security_policy")
             .unwrap();
         assert_eq!(sig.score, 0.0, "failing signal score must be 0");
-        assert_eq!(sig.max_points, 20.0, "failing signal max_points must still equal points");
+        assert_eq!(
+            sig.max_points, 20.0,
+            "failing signal max_points must still equal points"
+        );
     }
 
     // ── Highlight logic ──────────────────────────────────────────────────────
@@ -568,8 +615,16 @@ mod tests {
         let ids: std::collections::HashSet<&str> =
             graph.nodes.iter().map(|n| n.id.as_str()).collect();
         for edge in &graph.edges {
-            assert!(ids.contains(edge.from.as_str()), "edge.from '{}' is not a valid node", edge.from);
-            assert!(ids.contains(edge.to.as_str()), "edge.to '{}' is not a valid node", edge.to);
+            assert!(
+                ids.contains(edge.from.as_str()),
+                "edge.from '{}' is not a valid node",
+                edge.from
+            );
+            assert!(
+                ids.contains(edge.to.as_str()),
+                "edge.to '{}' is not a valid node",
+                edge.to
+            );
         }
     }
 
@@ -608,7 +663,9 @@ mod tests {
             graph.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
         for edge in graph.edges.iter().filter(|e| {
-            node_map.get(e.from.as_str()).map_or(false, |n| n.kind == "dimension")
+            node_map
+                .get(e.from.as_str())
+                .map_or(false, |n| n.kind == "dimension")
         }) {
             let parent = node_map[edge.from.as_str()];
             let child = node_map[edge.to.as_str()];
@@ -645,8 +702,12 @@ mod tests {
     #[test]
     fn higher_score_dimension_has_larger_radius() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
-        let sec = graph.nodes.iter().find(|n| n.id == "dim:Security").unwrap();          // 75
-        let gov = graph.nodes.iter().find(|n| n.id == "dim:Project Governance").unwrap(); // 30
+        let sec = graph.nodes.iter().find(|n| n.id == "dim:Security").unwrap(); // 75
+        let gov = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "dim:Project Governance")
+            .unwrap(); // 30
         assert!(
             sec.radius > gov.radius,
             "Security (score=75) must have larger radius than Governance (score=30)"
@@ -656,8 +717,16 @@ mod tests {
     #[test]
     fn higher_points_signal_has_larger_radius() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
-        let high = graph.nodes.iter().find(|n| n.id == "sig:Security:no_critical_cves").unwrap(); // 40 pts
-        let low = graph.nodes.iter().find(|n| n.id == "sig:Security:has_security_policy").unwrap(); // 20 pts
+        let high = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "sig:Security:no_critical_cves")
+            .unwrap(); // 40 pts
+        let low = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "sig:Security:has_security_policy")
+            .unwrap(); // 20 pts
         assert!(
             high.radius > low.radius,
             "40-point signal must have larger radius than 20-point signal"
@@ -671,7 +740,10 @@ mod tests {
         let mut config = NodeSizeConfig::default();
         config.orbit_l1 = 8.0; // non-default value
         let graph = DecisionGraph::from_maturity_with_config(&minimal_score(), config.clone());
-        assert_eq!(graph.config.orbit_l1, 8.0, "graph must preserve the config it was built with");
+        assert_eq!(
+            graph.config.orbit_l1, 8.0,
+            "graph must preserve the config it was built with"
+        );
     }
 
     // ── Phase 3: has_detail ──────────────────────────────────────────────────
@@ -680,25 +752,43 @@ mod tests {
     fn failing_signal_has_detail_true() {
         // make_signal sets detail=Some(...) for failing signals
         let graph = DecisionGraph::from_maturity(&minimal_score());
-        let sig = graph.nodes.iter().find(|n| n.id == "sig:Security:has_security_policy").unwrap();
+        let sig = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "sig:Security:has_security_policy")
+            .unwrap();
         assert!(!sig.passed, "signal must be failed");
-        assert!(sig.has_detail, "failing signal with detail text must have has_detail=true");
+        assert!(
+            sig.has_detail,
+            "failing signal with detail text must have has_detail=true"
+        );
     }
 
     #[test]
     fn passing_signal_has_detail_false() {
         // make_signal sets detail=None for passing signals
         let graph = DecisionGraph::from_maturity(&minimal_score());
-        let sig = graph.nodes.iter().find(|n| n.id == "sig:Security:no_critical_cves").unwrap();
+        let sig = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "sig:Security:no_critical_cves")
+            .unwrap();
         assert!(sig.passed, "signal must be passing");
-        assert!(!sig.has_detail, "passing signal with no detail must have has_detail=false");
+        assert!(
+            !sig.has_detail,
+            "passing signal with no detail must have has_detail=false"
+        );
     }
 
     #[test]
     fn root_and_dim_nodes_never_have_detail() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
         for node in graph.nodes.iter().filter(|n| n.kind != "signal") {
-            assert!(!node.has_detail, "{} node '{}' must always have has_detail=false", node.kind, node.id);
+            assert!(
+                !node.has_detail,
+                "{} node '{}' must always have has_detail=false",
+                node.kind, node.id
+            );
         }
     }
 
@@ -715,6 +805,7 @@ mod tests {
                     passed: true,
                     points: 20,
                     detail: Some("actionable finding".to_string()),
+                    tier: 1,
                 },
                 MaturitySignal {
                     name: "without_detail".to_string(),
@@ -722,6 +813,7 @@ mod tests {
                     passed: true,
                     points: 20,
                     detail: None,
+                    tier: 1,
                 },
             ],
         };
@@ -731,12 +823,21 @@ mod tests {
             dimensions: vec![dim],
         };
         let graph = DecisionGraph::from_maturity(&score);
-        let with_d = graph.nodes.iter().find(|n| n.id.contains("with_detail")).unwrap();
-        let without_d = graph.nodes.iter().find(|n| n.id.contains("without_detail")).unwrap();
+        let with_d = graph
+            .nodes
+            .iter()
+            .find(|n| n.id.contains("with_detail"))
+            .unwrap();
+        let without_d = graph
+            .nodes
+            .iter()
+            .find(|n| n.id.contains("without_detail"))
+            .unwrap();
         assert!(
             with_d.radius > without_d.radius,
             "signal with detail ({}) must have larger radius than same-points signal without ({})",
-            with_d.radius, without_d.radius
+            with_d.radius,
+            without_d.radius
         );
     }
 
@@ -750,7 +851,7 @@ mod tests {
             dimensions: vec![DimensionScore {
                 dimension: MaturityDimension::Security,
                 score: 60,
-                signals: vec![make_signal("a", true, 10)],  // 1 signal
+                signals: vec![make_signal("a", true, 10)], // 1 signal
             }],
         };
         let score_large = MaturityScore {
@@ -764,17 +865,26 @@ mod tests {
                     make_signal("b", true, 10),
                     make_signal("c", true, 10),
                     make_signal("d", true, 10),
-                ],  // 4 signals
+                ], // 4 signals
             }],
         };
         let r_small = DecisionGraph::from_maturity(&score_small)
-            .nodes.iter().find(|n| n.id == "dim:Security").unwrap().radius;
+            .nodes
+            .iter()
+            .find(|n| n.id == "dim:Security")
+            .unwrap()
+            .radius;
         let r_large = DecisionGraph::from_maturity(&score_large)
-            .nodes.iter().find(|n| n.id == "dim:Security").unwrap().radius;
+            .nodes
+            .iter()
+            .find(|n| n.id == "dim:Security")
+            .unwrap()
+            .radius;
         assert!(
             r_large > r_small,
             "dim with 4 signals ({}) must be larger than dim with 1 signal ({})",
-            r_large, r_small
+            r_large,
+            r_small
         );
     }
 
@@ -784,11 +894,16 @@ mod tests {
     fn root_dim_edges_carry_dimension_weight() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
         let sec_weight = MaturityDimension::Security.weight();
-        let edge = graph.edges.iter().find(|e| e.from == "root" && e.to == "dim:Security").unwrap();
+        let edge = graph
+            .edges
+            .iter()
+            .find(|e| e.from == "root" && e.to == "dim:Security")
+            .unwrap();
         assert!(
             (edge.weight - sec_weight).abs() < 1e-5,
             "root→dim edge weight must equal dimension weight (expected {}, got {})",
-            sec_weight, edge.weight
+            sec_weight,
+            edge.weight
         );
     }
 
@@ -796,13 +911,16 @@ mod tests {
     fn dim_sig_edges_carry_half_dimension_weight() {
         let graph = DecisionGraph::from_maturity(&minimal_score());
         let sec_weight = MaturityDimension::Security.weight();
-        let edge = graph.edges.iter()
+        let edge = graph
+            .edges
+            .iter()
             .find(|e| e.from == "dim:Security" && e.to.starts_with("sig:"))
             .unwrap();
         assert!(
             (edge.weight - sec_weight * 0.5).abs() < 1e-5,
             "dim→sig edge weight must be half the dimension weight (expected {}, got {})",
-            sec_weight * 0.5, edge.weight
+            sec_weight * 0.5,
+            edge.weight
         );
     }
 
@@ -816,13 +934,24 @@ mod tests {
         let graph_no_risk = DecisionGraph::from_maturity_full(&score, None, config.clone());
         let graph_high_risk = DecisionGraph::from_maturity_full(&score, Some(95), config.clone());
 
-        let r_no_risk = graph_no_risk.nodes.iter().find(|n| n.id == "root").unwrap().radius;
-        let r_high_risk = graph_high_risk.nodes.iter().find(|n| n.id == "root").unwrap().radius;
+        let r_no_risk = graph_no_risk
+            .nodes
+            .iter()
+            .find(|n| n.id == "root")
+            .unwrap()
+            .radius;
+        let r_high_risk = graph_high_risk
+            .nodes
+            .iter()
+            .find(|n| n.id == "root")
+            .unwrap()
+            .radius;
 
         assert!(
             r_high_risk > r_no_risk,
             "risk_score=95 root ({}) must be larger than no-risk root ({})",
-            r_high_risk, r_no_risk
+            r_high_risk,
+            r_no_risk
         );
     }
 
@@ -834,13 +963,24 @@ mod tests {
         let graph_full = DecisionGraph::from_maturity_full(&score, None, config.clone());
         let graph_default = DecisionGraph::from_maturity(&score);
 
-        let r_full = graph_full.nodes.iter().find(|n| n.id == "root").unwrap().radius;
-        let r_default = graph_default.nodes.iter().find(|n| n.id == "root").unwrap().radius;
+        let r_full = graph_full
+            .nodes
+            .iter()
+            .find(|n| n.id == "root")
+            .unwrap()
+            .radius;
+        let r_default = graph_default
+            .nodes
+            .iter()
+            .find(|n| n.id == "root")
+            .unwrap()
+            .radius;
 
         assert!(
             (r_full - r_default).abs() < 1e-5,
             "from_maturity_full(None) root radius ({}) must equal from_maturity ({})",
-            r_full, r_default
+            r_full,
+            r_default
         );
     }
 
@@ -900,7 +1040,9 @@ mod tests {
             assert!(
                 (dist - config.orbit_l2).abs() < 1e-4,
                 "signal '{}' must stay at orbit_l2={} (2 signals don't expand), got {}",
-                child.id, config.orbit_l2, dist
+                child.id,
+                config.orbit_l2,
+                dist
             );
         }
     }
@@ -923,7 +1065,11 @@ mod tests {
         let node_map: std::collections::HashMap<&str, &GraphNode> =
             graph.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
         let parent = node_map["dim:Security"];
-        let edge = graph.edges.iter().find(|e| e.from == "dim:Security").unwrap();
+        let edge = graph
+            .edges
+            .iter()
+            .find(|e| e.from == "dim:Security")
+            .unwrap();
         let child = node_map[edge.to.as_str()];
         let dx = child.px - parent.px;
         let dy = child.py - parent.py;
@@ -955,4 +1101,3 @@ mod tests {
         assert_eq!(back.sig_detail_boost, config.sig_detail_boost);
     }
 }
-

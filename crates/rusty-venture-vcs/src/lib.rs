@@ -6,9 +6,7 @@ pub mod provider;
 pub use azuredevops::AzureDevOpsProvider;
 pub use github::GithubProvider;
 pub use gitlab::GitlabProvider;
-pub use provider::{
-    CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoProvider, RepoRef,
-};
+pub use provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoProvider, RepoRef};
 
 // ── VcsError ──────────────────────────────────────────────────────────────────
 

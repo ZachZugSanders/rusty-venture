@@ -12,12 +12,9 @@ use serde::{Deserialize, Serialize};
 pub const CTX_MATURITY_SCORE: &str = "repo.maturity_score";
 
 use super::{
-    analyze_deps::DependencyReport,
-    audit_files::AuditReport,
-    detect_language::Language,
-    find_dockerfiles::DockerfileReport,
-    governance::GovernanceReport,
-    report::FinalReport,
+    active_validation::ActiveValidationReport, analyze_deps::DependencyReport,
+    audit_files::AuditReport, content_quality::ContentQualityReport, detect_language::Language,
+    find_dockerfiles::DockerfileReport, governance::GovernanceReport, report::FinalReport,
 };
 
 // ── Dimension weights (must sum to 1.0) ─────────────────────────────────────
@@ -44,9 +41,15 @@ pub struct MaturitySignal {
     pub points: u8,
     /// Optional additional context explaining why the signal passed or failed.
     pub detail: Option<String>,
+    /// Maturity tier this signal belongs to:
+    ///   1 = Static Discovery (file presence / static checks)
+    ///   2 = Content Quality  (file content inspection)
+    ///   3 = Active Functional Validation (run commands, execute tests)
+    pub tier: u8,
 }
 
 impl MaturitySignal {
+    /// Construct a Tier 1 (Static Discovery) signal.
     fn new(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -60,6 +63,27 @@ impl MaturitySignal {
             passed,
             points,
             detail: detail.into(),
+            tier: 1,
+        }
+    }
+
+    /// Construct a signal for an explicit tier.
+    #[allow(dead_code)]
+    fn new_tier(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        passed: bool,
+        points: u8,
+        detail: impl Into<Option<String>>,
+        tier: u8,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            passed,
+            points,
+            detail: detail.into(),
+            tier,
         }
     }
 }
@@ -118,13 +142,21 @@ pub struct DimensionScore {
 impl DimensionScore {
     fn compute(dimension: MaturityDimension, signals: Vec<MaturitySignal>) -> Self {
         let total: u32 = signals.iter().map(|s| s.points as u32).sum();
-        let earned: u32 = signals.iter().filter(|s| s.passed).map(|s| s.points as u32).sum();
+        let earned: u32 = signals
+            .iter()
+            .filter(|s| s.passed)
+            .map(|s| s.points as u32)
+            .sum();
         let score = if total == 0 {
             0u8
         } else {
             ((earned as f32 / total as f32) * 100.0).round() as u8
         };
-        Self { dimension, score, signals }
+        Self {
+            dimension,
+            score,
+            signals,
+        }
     }
 }
 
@@ -157,21 +189,21 @@ pub enum MaturityGrade {
 impl MaturityGrade {
     pub fn from_score(score: u8) -> Self {
         match score {
-            0..=20  => Self::Bronze,
+            0..=20 => Self::Bronze,
             21..=40 => Self::Silver,
             41..=60 => Self::Gold,
             61..=80 => Self::Platinum,
-            _       => Self::Diamond,
+            _ => Self::Diamond,
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Bronze   => "BRONZE",
-            Self::Silver   => "SILVER",
-            Self::Gold     => "GOLD",
+            Self::Bronze => "BRONZE",
+            Self::Silver => "SILVER",
+            Self::Gold => "GOLD",
             Self::Platinum => "PLATINUM",
-            Self::Diamond  => "DIAMOND",
+            Self::Diamond => "DIAMOND",
         }
     }
 
@@ -184,18 +216,18 @@ impl MaturityGrade {
     pub fn from_legacy_label(label: &str) -> Option<Self> {
         match label.to_ascii_uppercase().as_str() {
             // Current league tiers
-            "BRONZE"      => Some(Self::Bronze),
-            "SILVER"      => Some(Self::Silver),
-            "GOLD"        => Some(Self::Gold),
-            "PLATINUM"    => Some(Self::Platinum),
-            "DIAMOND"     => Some(Self::Diamond),
+            "BRONZE" => Some(Self::Bronze),
+            "SILVER" => Some(Self::Silver),
+            "GOLD" => Some(Self::Gold),
+            "PLATINUM" => Some(Self::Platinum),
+            "DIAMOND" => Some(Self::Diamond),
             // Legacy maturity-stage labels — each maps to its equivalent tier
-            "NASCENT"     => Some(Self::Bronze),
-            "EMERGING"    => Some(Self::Silver),
-            "DEVELOPING"  => Some(Self::Gold),
+            "NASCENT" => Some(Self::Bronze),
+            "EMERGING" => Some(Self::Silver),
+            "DEVELOPING" => Some(Self::Gold),
             "ESTABLISHED" => Some(Self::Platinum),
-            "EXEMPLARY"   => Some(Self::Diamond),
-            _             => None,
+            "EXEMPLARY" => Some(Self::Diamond),
+            _ => None,
         }
     }
 }
@@ -211,15 +243,15 @@ mod tests {
     /// Every boundary score listed in the issue must land in the correct tier.
     #[test]
     fn tier_boundaries_at_floor_and_ceiling_of_each_band() {
-        assert_eq!(MaturityGrade::from_score(0),   MaturityGrade::Bronze);
-        assert_eq!(MaturityGrade::from_score(20),  MaturityGrade::Bronze);
-        assert_eq!(MaturityGrade::from_score(21),  MaturityGrade::Silver);
-        assert_eq!(MaturityGrade::from_score(40),  MaturityGrade::Silver);
-        assert_eq!(MaturityGrade::from_score(41),  MaturityGrade::Gold);
-        assert_eq!(MaturityGrade::from_score(60),  MaturityGrade::Gold);
-        assert_eq!(MaturityGrade::from_score(61),  MaturityGrade::Platinum);
-        assert_eq!(MaturityGrade::from_score(80),  MaturityGrade::Platinum);
-        assert_eq!(MaturityGrade::from_score(81),  MaturityGrade::Diamond);
+        assert_eq!(MaturityGrade::from_score(0), MaturityGrade::Bronze);
+        assert_eq!(MaturityGrade::from_score(20), MaturityGrade::Bronze);
+        assert_eq!(MaturityGrade::from_score(21), MaturityGrade::Silver);
+        assert_eq!(MaturityGrade::from_score(40), MaturityGrade::Silver);
+        assert_eq!(MaturityGrade::from_score(41), MaturityGrade::Gold);
+        assert_eq!(MaturityGrade::from_score(60), MaturityGrade::Gold);
+        assert_eq!(MaturityGrade::from_score(61), MaturityGrade::Platinum);
+        assert_eq!(MaturityGrade::from_score(80), MaturityGrade::Platinum);
+        assert_eq!(MaturityGrade::from_score(81), MaturityGrade::Diamond);
         assert_eq!(MaturityGrade::from_score(100), MaturityGrade::Diamond);
     }
 
@@ -247,8 +279,16 @@ mod tests {
     #[test]
     fn no_legacy_or_abcdf_labels_in_active_grade_logic() {
         const FORBIDDEN: &[&str] = &[
-            "NASCENT", "EMERGING", "DEVELOPING", "ESTABLISHED", "EXEMPLARY",
-            "A", "B", "C", "D", "F",
+            "NASCENT",
+            "EMERGING",
+            "DEVELOPING",
+            "ESTABLISHED",
+            "EXEMPLARY",
+            "A",
+            "B",
+            "C",
+            "D",
+            "F",
         ];
         for grade in [
             MaturityGrade::Bronze,
@@ -270,35 +310,74 @@ mod tests {
 
     #[test]
     fn from_legacy_label_maps_all_historical_values() {
-        assert_eq!(MaturityGrade::from_legacy_label("NASCENT"),     Some(MaturityGrade::Bronze));
-        assert_eq!(MaturityGrade::from_legacy_label("EMERGING"),    Some(MaturityGrade::Silver));
-        assert_eq!(MaturityGrade::from_legacy_label("DEVELOPING"),  Some(MaturityGrade::Gold));
-        assert_eq!(MaturityGrade::from_legacy_label("ESTABLISHED"), Some(MaturityGrade::Platinum));
-        assert_eq!(MaturityGrade::from_legacy_label("EXEMPLARY"),   Some(MaturityGrade::Diamond));
+        assert_eq!(
+            MaturityGrade::from_legacy_label("NASCENT"),
+            Some(MaturityGrade::Bronze)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("EMERGING"),
+            Some(MaturityGrade::Silver)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("DEVELOPING"),
+            Some(MaturityGrade::Gold)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("ESTABLISHED"),
+            Some(MaturityGrade::Platinum)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("EXEMPLARY"),
+            Some(MaturityGrade::Diamond)
+        );
     }
 
     #[test]
     fn from_legacy_label_passes_through_current_tier_names() {
-        assert_eq!(MaturityGrade::from_legacy_label("BRONZE"),   Some(MaturityGrade::Bronze));
-        assert_eq!(MaturityGrade::from_legacy_label("SILVER"),   Some(MaturityGrade::Silver));
-        assert_eq!(MaturityGrade::from_legacy_label("GOLD"),     Some(MaturityGrade::Gold));
-        assert_eq!(MaturityGrade::from_legacy_label("PLATINUM"), Some(MaturityGrade::Platinum));
-        assert_eq!(MaturityGrade::from_legacy_label("DIAMOND"),  Some(MaturityGrade::Diamond));
+        assert_eq!(
+            MaturityGrade::from_legacy_label("BRONZE"),
+            Some(MaturityGrade::Bronze)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("SILVER"),
+            Some(MaturityGrade::Silver)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("GOLD"),
+            Some(MaturityGrade::Gold)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("PLATINUM"),
+            Some(MaturityGrade::Platinum)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("DIAMOND"),
+            Some(MaturityGrade::Diamond)
+        );
     }
 
     #[test]
     fn from_legacy_label_is_case_insensitive() {
-        assert_eq!(MaturityGrade::from_legacy_label("bronze"),  Some(MaturityGrade::Bronze));
-        assert_eq!(MaturityGrade::from_legacy_label("nascent"), Some(MaturityGrade::Bronze));
-        assert_eq!(MaturityGrade::from_legacy_label("Diamond"), Some(MaturityGrade::Diamond));
+        assert_eq!(
+            MaturityGrade::from_legacy_label("bronze"),
+            Some(MaturityGrade::Bronze)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("nascent"),
+            Some(MaturityGrade::Bronze)
+        );
+        assert_eq!(
+            MaturityGrade::from_legacy_label("Diamond"),
+            Some(MaturityGrade::Diamond)
+        );
     }
 
     #[test]
     fn from_legacy_label_returns_none_for_unknown() {
         assert_eq!(MaturityGrade::from_legacy_label("UNKNOWN"), None);
-        assert_eq!(MaturityGrade::from_legacy_label(""),        None);
-        assert_eq!(MaturityGrade::from_legacy_label("A"),       None);
-        assert_eq!(MaturityGrade::from_legacy_label("D"),       None);
+        assert_eq!(MaturityGrade::from_legacy_label(""), None);
+        assert_eq!(MaturityGrade::from_legacy_label("A"), None);
+        assert_eq!(MaturityGrade::from_legacy_label("D"), None);
     }
 
     // -- API contract: serialised grade is a league tier ----------------------
@@ -309,15 +388,19 @@ mod tests {
     #[test]
     fn maturity_grade_serialises_to_screaming_snake_league_tier() {
         let cases = [
-            (MaturityGrade::Bronze,   "\"BRONZE\""),
-            (MaturityGrade::Silver,   "\"SILVER\""),
-            (MaturityGrade::Gold,     "\"GOLD\""),
+            (MaturityGrade::Bronze, "\"BRONZE\""),
+            (MaturityGrade::Silver, "\"SILVER\""),
+            (MaturityGrade::Gold, "\"GOLD\""),
             (MaturityGrade::Platinum, "\"PLATINUM\""),
-            (MaturityGrade::Diamond,  "\"DIAMOND\""),
+            (MaturityGrade::Diamond, "\"DIAMOND\""),
         ];
         for (grade, expected_json) in cases {
             let json = serde_json::to_string(&grade).expect("serialize MaturityGrade");
-            assert_eq!(json, expected_json, "{:?} did not serialise to {:?}", grade, expected_json);
+            assert_eq!(
+                json, expected_json,
+                "{:?} did not serialise to {:?}",
+                grade, expected_json
+            );
         }
     }
 
@@ -325,11 +408,11 @@ mod tests {
     fn maturity_grade_deserialises_only_league_tier_strings() {
         // Current tier strings must round-trip.
         let valid = [
-            ("\"BRONZE\"",   MaturityGrade::Bronze),
-            ("\"SILVER\"",   MaturityGrade::Silver),
-            ("\"GOLD\"",     MaturityGrade::Gold),
+            ("\"BRONZE\"", MaturityGrade::Bronze),
+            ("\"SILVER\"", MaturityGrade::Silver),
+            ("\"GOLD\"", MaturityGrade::Gold),
             ("\"PLATINUM\"", MaturityGrade::Platinum),
-            ("\"DIAMOND\"",  MaturityGrade::Diamond),
+            ("\"DIAMOND\"", MaturityGrade::Diamond),
         ];
         for (json, expected) in valid {
             let grade: MaturityGrade =
@@ -339,9 +422,16 @@ mod tests {
 
         // Legacy and A/B/C/D/F strings must NOT deserialise.
         let forbidden = [
-            "\"NASCENT\"", "\"EMERGING\"", "\"DEVELOPING\"",
-            "\"ESTABLISHED\"", "\"EXEMPLARY\"",
-            "\"A\"", "\"B\"", "\"C\"", "\"D\"", "\"F\"",
+            "\"NASCENT\"",
+            "\"EMERGING\"",
+            "\"DEVELOPING\"",
+            "\"ESTABLISHED\"",
+            "\"EXEMPLARY\"",
+            "\"A\"",
+            "\"B\"",
+            "\"C\"",
+            "\"D\"",
+            "\"F\"",
         ];
         for s in forbidden {
             let result: Result<MaturityGrade, _> = serde_json::from_str(s);
@@ -368,8 +458,10 @@ pub struct MaturityScore {
 
 /// Compute the full maturity score from all available analysis reports.
 ///
-/// All inputs are required — pass defaults (empty structs) for steps that
-/// failed gracefully; the scorer handles absence conservatively (no points).
+/// `content` is `Some` only when `scan_tier >= 2` and the content-quality
+/// action ran successfully. When `None`, Tier 2 signals are omitted from all
+/// dimensions so the score is based purely on the Tier 1 static checks.
+#[allow(clippy::too_many_arguments)]
 pub fn compute_maturity(
     _report: &FinalReport,
     deps: &DependencyReport,
@@ -377,14 +469,16 @@ pub fn compute_maturity(
     audit: &AuditReport,
     primary_language: &Language,
     gov: &GovernanceReport,
+    content: Option<&ContentQualityReport>,
+    active: Option<&ActiveValidationReport>,
 ) -> MaturityScore {
     let dimensions = vec![
-        score_security(audit, gov),
-        score_dependency_health(deps, dockerfiles, gov),
-        score_build_and_ci(dockerfiles, gov),
-        score_code_organization(primary_language, deps, gov),
-        score_project_governance(gov),
-        score_testing_and_quality(gov),
+        score_security(audit, gov, content),
+        score_dependency_health(deps, dockerfiles, gov, content),
+        score_build_and_ci(dockerfiles, gov, content, active),
+        score_code_organization(primary_language, deps, gov, active),
+        score_project_governance(gov, content),
+        score_testing_and_quality(gov, content, active),
     ];
 
     let composite = {
@@ -405,8 +499,12 @@ pub fn compute_maturity(
 // ── Dimension scorers ────────────────────────────────────────────────────────
 
 /// Security (25%) — OpenSSF Scorecard static checks + CII no-credential requirement.
-fn score_security(audit: &AuditReport, gov: &GovernanceReport) -> DimensionScore {
-    let signals = vec![
+fn score_security(
+    audit: &AuditReport,
+    gov: &GovernanceReport,
+    content: Option<&ContentQualityReport>,
+) -> DimensionScore {
+    let mut signals = vec![
         // No critical violations — highest weight; directly maps to OpenSSF Binary-Artifacts
         // and CII no_leaked_credentials criteria.
         MaturitySignal::new(
@@ -415,7 +513,10 @@ fn score_security(audit: &AuditReport, gov: &GovernanceReport) -> DimensionScore
             audit.critical_count == 0,
             40,
             if audit.critical_count > 0 {
-                Some(format!("{} critical violation(s) found", audit.critical_count))
+                Some(format!(
+                    "{} critical violation(s) found",
+                    audit.critical_count
+                ))
             } else {
                 None
             },
@@ -427,7 +528,10 @@ fn score_security(audit: &AuditReport, gov: &GovernanceReport) -> DimensionScore
             audit.warning_count <= 2,
             20,
             if audit.warning_count > 2 {
-                Some(format!("{} warning violation(s) found", audit.warning_count))
+                Some(format!(
+                    "{} warning violation(s) found",
+                    audit.warning_count
+                ))
             } else {
                 None
             },
@@ -457,6 +561,24 @@ fn score_security(audit: &AuditReport, gov: &GovernanceReport) -> DimensionScore
             },
         ),
     ];
+
+    // ── Tier 2 signals ───────────────────────────────────────────────────────
+    if let Some(cq) = content {
+        // License is a recognised SPDX identifier — confirms code is actually open-source
+        signals.push(MaturitySignal::new_tier(
+            "license_spdx_recognized",
+            "LICENSE file contains a recognised SPDX license identifier (MIT, Apache, GPL, BSD, etc.)",
+            cq.license_is_spdx,
+            20,
+            if !cq.license_is_spdx {
+                Some("LICENSE file does not contain a recognised SPDX identifier. Use a standard license text (MIT, Apache-2.0, etc.)".to_string())
+            } else {
+                None
+            },
+            2,
+        ));
+    }
+
     DimensionScore::compute(MaturityDimension::Security, signals)
 }
 
@@ -465,6 +587,7 @@ fn score_dependency_health(
     deps: &DependencyReport,
     dockerfiles: &DockerfileReport,
     gov: &GovernanceReport,
+    content: Option<&ContentQualityReport>,
 ) -> DimensionScore {
     let dep_count = deps.dependencies.len();
 
@@ -480,12 +603,15 @@ fn score_dependency_health(
     // Reasonable dep count: 0-30 full points, 31-60 partial, >60 none
     let dep_count_ok = dep_count <= 60;
     let dep_count_detail = if dep_count > 60 {
-        Some(format!("{} direct dependencies — consider auditing for unused/redundant ones", dep_count))
+        Some(format!(
+            "{} direct dependencies — consider auditing for unused/redundant ones",
+            dep_count
+        ))
     } else {
         None
     };
 
-    let signals = vec![
+    let mut signals = vec![
         // Lock file committed — CII Silver: external_dependencies criterion
         MaturitySignal::new(
             "lock_file_present",
@@ -527,17 +653,39 @@ fn score_dependency_health(
             },
         ),
     ];
+
+    // ── Tier 2 signals ───────────────────────────────────────────────────────
+    if let Some(cq) = content {
+        // Lock file freshness — lock file is not older than the dependency manifest
+        if cq.lockfile_pair_found {
+            signals.push(MaturitySignal::new_tier(
+                "lockfile_not_stale",
+                "Lock file is up to date relative to the dependency manifest",
+                cq.lockfile_not_stale,
+                25,
+                if !cq.lockfile_not_stale {
+                    Some("Lock file appears stale — run your package manager to regenerate it (cargo update, npm install, etc.)".to_string())
+                } else {
+                    None
+                },
+                2,
+            ));
+        }
+    }
+
     DimensionScore::compute(MaturityDimension::DependencyHealth, signals)
 }
 
 /// Build & CI (15%) — OpenSSF Dangerous-Workflow (static) + CII CI criteria.
-fn score_build_and_ci(dockerfiles: &DockerfileReport, gov: &GovernanceReport) -> DimensionScore {
-    let has_dockerfile_issues = dockerfiles
-        .entries
-        .iter()
-        .any(|e| !e.warnings.is_empty());
+fn score_build_and_ci(
+    dockerfiles: &DockerfileReport,
+    gov: &GovernanceReport,
+    content: Option<&ContentQualityReport>,
+    active: Option<&ActiveValidationReport>,
+) -> DimensionScore {
+    let has_dockerfile_issues = dockerfiles.entries.iter().any(|e| !e.warnings.is_empty());
 
-    let signals = vec![
+    let mut signals = vec![
         // CI configuration present — CII test_continuous_integration criterion
         MaturitySignal::new(
             "ci_config_present",
@@ -575,6 +723,88 @@ fn score_build_and_ci(dockerfiles: &DockerfileReport, gov: &GovernanceReport) ->
             },
         ),
     ];
+
+    // ── Tier 2 signals ───────────────────────────────────────────────────────
+    if let Some(cq) = content {
+        // CI config actually references a test command (not just presence check)
+        if gov.has_ci_config {
+            signals.push(MaturitySignal::new_tier(
+                "ci_runs_tests_command",
+                "CI configuration references an actual test command (cargo test, pytest, jest, etc.)",
+                cq.ci_has_test_command,
+                30,
+                if !cq.ci_has_test_command {
+                    Some("CI config found but no test command detected — add a test step to your CI pipeline".to_string())
+                } else {
+                    None
+                },
+                2,
+            ));
+        }
+
+        // Dockerfile switches to a non-root user
+        if dockerfiles.has_root_dockerfile {
+            signals.push(MaturitySignal::new_tier(
+                "dockerfile_nonroot_user",
+                "Dockerfile switches to a non-root user with a USER directive",
+                cq.dockerfile_has_nonroot_user,
+                20,
+                if !cq.dockerfile_has_nonroot_user {
+                    Some("Add a USER directive in your Dockerfile to run as a non-root user (e.g. USER appuser)".to_string())
+                } else {
+                    None
+                },
+                2,
+            ));
+        }
+    }
+
+    // ── Tier 3 signals ───────────────────────────────────────────────────────
+    if let Some(av) = active {
+        // Build succeeds
+        if let Some(passed) = av.build_result {
+            signals.push(MaturitySignal::new_tier(
+                "build_succeeds",
+                "Project builds successfully (cargo build, npm run build, go build, etc.)",
+                passed,
+                40,
+                if passed {
+                    if av.build_command.is_empty() {
+                        None
+                    } else {
+                        Some(format!("`{}` succeeded", av.build_command))
+                    }
+                } else {
+                    Some(format!(
+                        "`{}` failed — snippet: {}",
+                        av.build_command,
+                        av.build_output_snippet
+                            .chars()
+                            .take(200)
+                            .collect::<String>()
+                    ))
+                },
+                3,
+            ));
+        }
+
+        // Docker Compose YAML is valid
+        if let Some(valid) = av.compose_result {
+            signals.push(MaturitySignal::new_tier(
+                "docker_compose_valid",
+                "docker-compose.yml / compose.yml is valid YAML",
+                valid,
+                20,
+                if !valid {
+                    Some("Compose file contains YAML syntax errors".to_string())
+                } else {
+                    None
+                },
+                3,
+            ));
+        }
+    }
+
     DimensionScore::compute(MaturityDimension::BuildAndCi, signals)
 }
 
@@ -583,6 +813,7 @@ fn score_code_organization(
     primary_language: &Language,
     deps: &DependencyReport,
     gov: &GovernanceReport,
+    active: Option<&ActiveValidationReport>,
 ) -> DimensionScore {
     // Language-specific version constraint signal
     let has_version_constraint = match primary_language {
@@ -590,8 +821,12 @@ fn score_code_organization(
         Language::Node => gov.node_engine_declared,
         Language::Python => gov.python_requires_declared,
         Language::Go => gov.go_version_declared,
-        Language::Java | Language::Ruby | Language::PHP | Language::CSharp
-        | Language::Swift | Language::Kotlin => !deps.manifest_file.is_empty(),
+        Language::Java
+        | Language::Ruby
+        | Language::PHP
+        | Language::CSharp
+        | Language::Swift
+        | Language::Kotlin => !deps.manifest_file.is_empty(),
         Language::Unknown => false,
     };
 
@@ -608,7 +843,7 @@ fn score_code_organization(
         None
     };
 
-    let signals = vec![
+    let mut signals = vec![
         // Minimum runtime version declared — language API guidelines + CII version_semver
         MaturitySignal::new(
             "runtime_version_declared",
@@ -654,12 +889,38 @@ fn score_code_organization(
             },
         ),
     ];
+
+    // ── Tier 3 signals ───────────────────────────────────────────────────────
+    if let Some(av) = active {
+        if let Some(passed) = av.lint_result {
+            signals.push(MaturitySignal::new_tier(
+                "linter_passes",
+                "Linter / static analysis passes with zero warnings or errors",
+                passed,
+                30,
+                if passed {
+                    Some(format!("`{}` passed with no issues", av.lint_command))
+                } else {
+                    Some(format!(
+                        "`{}` reported issues — snippet: {}",
+                        av.lint_command,
+                        av.lint_output_snippet.chars().take(200).collect::<String>()
+                    ))
+                },
+                3,
+            ));
+        }
+    }
+
     DimensionScore::compute(MaturityDimension::CodeOrganization, signals)
 }
 
 /// Project Governance (15%) — CII Best Practices Passing + Silver level file checks.
-fn score_project_governance(gov: &GovernanceReport) -> DimensionScore {
-    let signals = vec![
+fn score_project_governance(
+    gov: &GovernanceReport,
+    content: Option<&ContentQualityReport>,
+) -> DimensionScore {
+    let mut signals = vec![
         // LICENSE — CII floss_license + OpenSSF License check
         MaturitySignal::new(
             "license_present",
@@ -685,7 +946,10 @@ fn score_project_governance(gov: &GovernanceReport) -> DimensionScore {
             gov.has_readme,
             25,
             if !gov.has_readme {
-                Some("Add a README.md describing what the project does and how to use it".to_string())
+                Some(
+                    "Add a README.md describing what the project does and how to use it"
+                        .to_string(),
+                )
             } else {
                 None
             },
@@ -697,7 +961,10 @@ fn score_project_governance(gov: &GovernanceReport) -> DimensionScore {
             gov.has_changelog,
             20,
             if !gov.has_changelog {
-                Some("Add a CHANGELOG.md following Keep a Changelog format (keepachangelog.com)".to_string())
+                Some(
+                    "Add a CHANGELOG.md following Keep a Changelog format (keepachangelog.com)"
+                        .to_string(),
+                )
             } else {
                 None
             },
@@ -709,7 +976,10 @@ fn score_project_governance(gov: &GovernanceReport) -> DimensionScore {
             gov.has_contributing,
             15,
             if !gov.has_contributing {
-                Some("Add CONTRIBUTING.md with development setup, PR guidelines, and code standards".to_string())
+                Some(
+                    "Add CONTRIBUTING.md with development setup, PR guidelines, and code standards"
+                        .to_string(),
+                )
             } else {
                 None
             },
@@ -727,12 +997,58 @@ fn score_project_governance(gov: &GovernanceReport) -> DimensionScore {
             },
         ),
     ];
+
+    // ── Tier 2 signals ───────────────────────────────────────────────────────
+    if let Some(cq) = content {
+        // README has real substance (>100 words + section headings)
+        if gov.has_readme {
+            let readme_ok = cq.readme_word_count >= 100 && cq.readme_has_headings;
+            signals.push(MaturitySignal::new_tier(
+                "readme_has_substance",
+                "README has meaningful content (≥100 words and section headings)",
+                readme_ok,
+                25,
+                if !readme_ok {
+                    let detail = if cq.readme_word_count < 100 {
+                        format!("README has only {} words — expand it with installation, usage, and contribution instructions", cq.readme_word_count)
+                    } else {
+                        "README lacks section headings — add ## headings for Installation, Usage, etc.".to_string()
+                    };
+                    Some(detail)
+                } else {
+                    None
+                },
+                2,
+            ));
+        }
+
+        // CHANGELOG has versioned entries
+        if gov.has_changelog {
+            signals.push(MaturitySignal::new_tier(
+                "changelog_has_versions",
+                "CHANGELOG contains versioned entries (semver format)",
+                cq.changelog_has_versions,
+                20,
+                if !cq.changelog_has_versions {
+                    Some("CHANGELOG found but no semver entries detected — use '## [1.0.0]' format (keepachangelog.com)".to_string())
+                } else {
+                    None
+                },
+                2,
+            ));
+        }
+    }
+
     DimensionScore::compute(MaturityDimension::ProjectGovernance, signals)
 }
 
 /// Testing & Quality (10%) — CII test + SAST criteria; ISO 25010 Testability.
-fn score_testing_and_quality(gov: &GovernanceReport) -> DimensionScore {
-    let signals = vec![
+fn score_testing_and_quality(
+    gov: &GovernanceReport,
+    content: Option<&ContentQualityReport>,
+    active: Option<&ActiveValidationReport>,
+) -> DimensionScore {
+    let mut signals = vec![
         // Test directory or files present — CII test criterion
         MaturitySignal::new(
             "test_files_present",
@@ -764,11 +1080,57 @@ fn score_testing_and_quality(gov: &GovernanceReport) -> DimensionScore {
             gov.has_lint_config,
             20,
             if !gov.has_lint_config {
-                Some("Configure a SAST or linter tool (clippy, ESLint, ruff, golangci-lint, etc.)".to_string())
+                Some(
+                    "Configure a SAST or linter tool (clippy, ESLint, ruff, golangci-lint, etc.)"
+                        .to_string(),
+                )
             } else {
                 None
             },
         ),
     ];
+
+    // ── Tier 2 signals ───────────────────────────────────────────────────────
+    if let Some(cq) = content {
+        // Test files contain real test function definitions
+        if gov.has_test_files {
+            let has_real_tests = cq.test_function_count >= 1;
+            signals.push(MaturitySignal::new_tier(
+                "test_functions_present",
+                "Test files contain actual test function definitions",
+                has_real_tests,
+                40,
+                if !has_real_tests {
+                    Some("Test files found but no test function definitions detected — add actual test functions (#[test], def test_*, func Test*, etc.)".to_string())
+                } else {
+                    Some(format!("{} test function(s) found", cq.test_function_count))
+                },
+                2,
+            ));
+        }
+    }
+
+    // ── Tier 3 signals ───────────────────────────────────────────────────────
+    if let Some(av) = active {
+        if let Some(passed) = av.test_result {
+            signals.push(MaturitySignal::new_tier(
+                "tests_pass",
+                "Test suite runs and all tests pass",
+                passed,
+                60,
+                if passed {
+                    Some(format!("`{}` — all tests passed", av.test_command))
+                } else {
+                    Some(format!(
+                        "`{}` had failures — snippet: {}",
+                        av.test_command,
+                        av.test_output_snippet.chars().take(200).collect::<String>()
+                    ))
+                },
+                3,
+            ));
+        }
+    }
+
     DimensionScore::compute(MaturityDimension::TestingAndQuality, signals)
 }

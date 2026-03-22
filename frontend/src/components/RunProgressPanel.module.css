@@ -1,0 +1,141 @@
+.panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 20px;
+    gap: 14px;
+    min-height: 0;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+
+.repoInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.repoUrl {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.badge.running {
+    background: rgba(224, 93, 46, 0.15);
+    color: var(--accent);
+}
+
+.badge.done {
+    background: rgba(60, 180, 100, 0.15);
+    color: #3cb464;
+}
+
+.badge.error {
+    background: rgba(220, 60, 60, 0.15);
+    color: #dc4040;
+}
+
+.pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.doneBar {
+    background: rgba(60, 180, 100, 0.1);
+    border: 1px solid rgba(60, 180, 100, 0.25);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    color: #3cb464;
+    flex-shrink: 0;
+}
+
+.errorBar {
+    background: rgba(220, 60, 60, 0.1);
+    border: 1px solid rgba(220, 60, 60, 0.25);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    color: #dc4040;
+    flex-shrink: 0;
+}
+
+.logWrap {
+    flex: 1;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    min-height: 0;
+}
+
+.logEmpty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.logLine {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 1px 0;
+}
+
+.logLevel {
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: 0.68rem;
+    width: 38px;
+    text-align: right;
+}
+
+.logStep {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.logMsg {
+    color: var(--text);
+    word-break: break-word;
+}
+
+.level_info .logLevel { color: #6b8cba; }
+.level_warn .logLevel { color: #c9a227; }
+.level_error .logLevel { color: #dc4040; }
+
+.level_warn .logMsg { color: #c9a227; }
+.level_error .logMsg { color: #dc4040; }

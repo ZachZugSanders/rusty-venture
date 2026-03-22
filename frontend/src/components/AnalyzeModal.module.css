@@ -1,0 +1,614 @@
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+.form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+/* ── Text inputs ─────────────────────────────────────────────────────────── */
+
+.fieldGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.fieldLabel {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.optional {
+    color: var(--text-muted);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.875rem;
+    padding: 8px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.input:focus {
+    border-color: var(--accent);
+}
+
+.input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* ── Pipeline section ────────────────────────────────────────────────────── */
+
+.pipelineSection {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pipelineSectionLabel {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+}
+
+.pipeline {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+/* ── Stage ───────────────────────────────────────────────────────────────── */
+
+.stageWrap {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.stage {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.stageModeTag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border-bottom: 1px solid var(--border);
+}
+
+.stageParallel .stageModeTag {
+    color: var(--accent);
+    background: rgba(88, 166, 255, 0.05);
+    border-bottom-color: rgba(88, 166, 255, 0.15);
+}
+
+.stageActions {
+    display: flex;
+    flex-direction: column;
+}
+
+.stageActionsRow {
+    flex-direction: row;
+}
+
+/* ── Connector ───────────────────────────────────────────────────────────── */
+
+.connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 2px 0;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.connLine {
+    width: 1px;
+    height: 8px;
+    background: var(--border);
+}
+
+.connArrow {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    line-height: 1;
+}
+
+/* ── Action card ─────────────────────────────────────────────────────────── */
+
+.actionCard {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+    gap: 0;
+    transition: opacity 0.2s;
+}
+
+.actionCard + .actionCard {
+    border-top: 1px solid var(--border);
+}
+
+/* In parallel rows, cards sit side-by-side */
+.actionCardFlex {
+    flex: 1;
+    min-width: 0;
+}
+
+.stageActionsRow .actionCard + .actionCard {
+    border-top: none;
+    border-left: 1px solid var(--border);
+}
+
+.actionDimmed {
+    opacity: 0.38;
+}
+
+.actionRow {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.actionIcon {
+    font-size: 1.05rem;
+    line-height: 1.4;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.actionInfo {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.actionName {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+.actionDesc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.actionControl {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding-top: 2px;
+}
+
+/* ── Required badge ──────────────────────────────────────────────────────── */
+
+.requiredBadge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+
+/* ── Toggle switch ───────────────────────────────────────────────────────── */
+
+.toggleSwitch {
+    position: relative;
+    display: inline-block;
+    width: 34px;
+    height: 20px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.toggleSwitch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+.toggleSlider {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 20px;
+    transition: background 0.18s;
+    cursor: pointer;
+}
+
+.toggleSlider::before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    left: 3px;
+    top: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.18s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.toggleSwitch input:checked + .toggleSlider {
+    background: var(--accent);
+}
+
+.toggleSwitch input:checked + .toggleSlider::before {
+    transform: translateX(14px);
+}
+
+.toggleSwitch input:disabled + .toggleSlider {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* ── Sub-option (inside action card) ─────────────────────────────────────── */
+
+.subOption {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+    cursor: pointer;
+}
+
+.subOptionLabel {
+    font-size: 0.775rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.formFooter {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.submitBtn {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 22px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.submitBtn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.spinner {
+    width: 13px;
+    height: 13px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.errorCard {
+    background: rgba(248, 81, 73, 0.08);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 0.875rem;
+    color: var(--red);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* ── Result view (kept for other consumers) ──────────────────────────────── */
+
+.resultView {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.resultHeader {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.resultMeta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.resultUrl {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.resultDuration {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.resultScores {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.resultComposite {
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.resultCompositeLabel {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    align-self: flex-end;
+    margin-bottom: 4px;
+}
+
+.summaryCard {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+}
+
+.summaryText {
+    font-size: 0.875rem;
+    color: var(--text);
+    line-height: 1.65;
+}
+
+.riskBanner {
+    background: rgba(248, 81, 73, 0.08);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 0.875rem;
+    color: var(--red);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.violationList {
+    margin: 0;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.845rem;
+}
+
+.sectionTitle {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.dimGrid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dimCard {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.dimHeader {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 14px;
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s;
+}
+
+.dimHeader:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.dimName {
+    font-size: 0.875rem;
+    font-weight: 500;
+    flex: 1;
+}
+
+.dimMeta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.dimPassedCount {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.dimScore {
+    font-size: 1rem;
+    font-weight: 700;
+    min-width: 2.2ch;
+    text-align: right;
+}
+
+.dimChevron {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    width: 10px;
+    text-align: center;
+}
+
+.dimBar {
+    height: 2px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.dimBarFill {
+    height: 100%;
+    transition: width 0.4s ease;
+}
+
+.signalList {
+    list-style: none;
+    border-top: 1px solid var(--border);
+    padding: 6px 0;
+}
+
+.signalItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 6px 14px;
+    font-size: 0.8rem;
+    transition: background 0.1s;
+}
+
+.signalItem:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.signalIcon {
+    font-size: 0.7rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+    width: 12px;
+    text-align: center;
+}
+
+.signalPass .signalIcon { color: var(--green); }
+.signalFail .signalIcon { color: var(--red); }
+
+.signalBody {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.signalName {
+    color: var(--text);
+    line-height: 1.4;
+}
+
+.signalDetail {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.signalPoints {
+    color: var(--red);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.recList {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.recItem {
+    display: flex;
+    gap: 10px;
+    font-size: 0.845rem;
+    color: var(--text);
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    line-height: 1.55;
+}
+
+.recItem::before {
+    content: '→';
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 1px;
+}

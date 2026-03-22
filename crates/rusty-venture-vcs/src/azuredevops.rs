@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::{
-    provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoRef, RepoProvider},
+    provider::{CodeSearchHit, CommitSha, FileCommit, RemoteRepo, RepoProvider, RepoRef},
     VcsError,
 };
 
@@ -33,7 +33,9 @@ impl RepoProvider for AzureDevOpsProvider {
     }
 
     async fn list_org_repos(&self, _project: &str) -> Result<Vec<RemoteRepo>, VcsError> {
-        Err(VcsError::NotImplemented("Azure DevOps list_org_repos".to_string()))
+        Err(VcsError::NotImplemented(
+            "Azure DevOps list_org_repos".to_string(),
+        ))
     }
 
     async fn search_code(
@@ -41,7 +43,9 @@ impl RepoProvider for AzureDevOpsProvider {
         _query: &str,
         _filename_glob: &str,
     ) -> Result<Vec<CodeSearchHit>, VcsError> {
-        Err(VcsError::NotImplemented("Azure DevOps search_code".to_string()))
+        Err(VcsError::NotImplemented(
+            "Azure DevOps search_code".to_string(),
+        ))
     }
 
     async fn create_branch(
@@ -50,7 +54,9 @@ impl RepoProvider for AzureDevOpsProvider {
         _branch: &str,
         _from_ref: &str,
     ) -> Result<(), VcsError> {
-        Err(VcsError::NotImplemented("Azure DevOps create_branch".to_string()))
+        Err(VcsError::NotImplemented(
+            "Azure DevOps create_branch".to_string(),
+        ))
     }
 
     async fn get_file(
@@ -59,7 +65,9 @@ impl RepoProvider for AzureDevOpsProvider {
         _path: &str,
         _git_ref: &str,
     ) -> Result<Option<(String, String)>, VcsError> {
-        Err(VcsError::NotImplemented("Azure DevOps get_file".to_string()))
+        Err(VcsError::NotImplemented(
+            "Azure DevOps get_file".to_string(),
+        ))
     }
 
     async fn commit_files(
@@ -69,6 +77,8 @@ impl RepoProvider for AzureDevOpsProvider {
         _files: Vec<FileCommit>,
         _message: &str,
     ) -> Result<CommitSha, VcsError> {
-        Err(VcsError::NotImplemented("Azure DevOps commit_files".to_string()))
+        Err(VcsError::NotImplemented(
+            "Azure DevOps commit_files".to_string(),
+        ))
     }
 }

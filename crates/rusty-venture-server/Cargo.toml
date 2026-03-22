@@ -21,6 +21,11 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 dotenvy.workspace = true
+dashmap.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

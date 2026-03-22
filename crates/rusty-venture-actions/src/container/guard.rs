@@ -1,8 +1,8 @@
+use bollard::Docker;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use bollard::Docker;
 use tracing::warn;
 
 /// RAII guard for a running Docker container. On `Drop`, spawns a background
@@ -34,10 +34,7 @@ impl ContainerGuard {
     async fn do_cleanup(&self) {
         use bollard::container::RemoveContainerOptions;
 
-        let _ = self
-            .docker
-            .stop_container(&self.id, None)
-            .await;
+        let _ = self.docker.stop_container(&self.id, None).await;
 
         if let Err(e) = self
             .docker

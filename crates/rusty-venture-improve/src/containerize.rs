@@ -133,10 +133,14 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
         _input: (),
     ) -> Result<ContainerizeResult, CoreError> {
         let repo_url = ctx.require::<String>(CTX_REPO_URL).await?;
-        let languages: DetectedLanguages =
-            ctx.get::<DetectedLanguages>(CTX_DETECTED_LANGUAGES).await.unwrap_or_default();
-        let deps: DependencyReport =
-            ctx.get::<DependencyReport>(CTX_DEPENDENCY_REPORT).await.unwrap_or_default();
+        let languages: DetectedLanguages = ctx
+            .get::<DetectedLanguages>(CTX_DETECTED_LANGUAGES)
+            .await
+            .unwrap_or_default();
+        let deps: DependencyReport = ctx
+            .get::<DependencyReport>(CTX_DEPENDENCY_REPORT)
+            .await
+            .unwrap_or_default();
         let scaffold: Option<ScaffoldSpec> = ctx.get::<ScaffoldSpec>(CTX_SCAFFOLD_SPEC).await;
 
         info!(repo = %repo_url, language = %languages.primary, "Starting containerization");
@@ -158,7 +162,9 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
         }
 
         let existing_dockerfile = if has_dockerfile {
-            tokio::fs::read_to_string(temp_dir.path().join("Dockerfile")).await.ok()
+            tokio::fs::read_to_string(temp_dir.path().join("Dockerfile"))
+                .await
+                .ok()
         } else {
             None
         };
@@ -186,10 +192,8 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
                 )
                 .await?,
             )
-        } else if has_compose {
-            None // don't overwrite an existing compose file
         } else {
-            None
+            None // has_compose or service doesn't need compose
         };
 
         // ── 5. Agentic build-validate-fix loop ────────────────────────────
@@ -202,10 +206,7 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
                 .await
                 .map_err(|e| CoreError::other(format!("Failed to write Dockerfile: {e}")))?;
 
-            let image_tag = format!(
-                "rusty-venture-validate-{}:{}",
-                ctx.run_id, attempt
-            );
+            let image_tag = format!("rusty-venture-validate-{}:{}", ctx.run_id, attempt);
 
             info!(attempt, tag = %image_tag, "Running docker build");
 
@@ -254,8 +255,7 @@ impl<C: LlmConnector + 'static> Action for ContainerizeAction<C> {
 
         info!(
             validated = build_validated,
-            fix_iterations,
-            "Containerization complete"
+            fix_iterations, "Containerization complete"
         );
 
         ctx.insert(CTX_CONTAINERIZE_RESULT, result.clone()).await;
@@ -298,7 +298,12 @@ async fn generate_dockerfile<C: LlmConnector>(
             let file_hints: Vec<String> = s
                 .files
                 .iter()
-                .filter(|f| matches!(f.purpose, rusty_venture_actions::repo::scaffold::FilePurpose::Dockerfile))
+                .filter(|f| {
+                    matches!(
+                        f.purpose,
+                        rusty_venture_actions::repo::scaffold::FilePurpose::Dockerfile
+                    )
+                })
                 .filter_map(|f| f.template_hint.clone())
                 .collect();
             if file_hints.is_empty() {
@@ -535,25 +540,41 @@ fn language_dockerfile_hints(lang: &Language) -> &'static str {
 /// Returns true if this repo is likely a service (HTTP server, worker, etc.)
 /// rather than a pure library, based on language and dependency signals.
 fn looks_like_service(lang: &Language, deps: &DependencyReport) -> bool {
-    let dep_names: Vec<String> =
-        deps.dependencies.iter().map(|d| d.name.to_lowercase()).collect();
+    let dep_names: Vec<String> = deps
+        .dependencies
+        .iter()
+        .map(|d| d.name.to_lowercase())
+        .collect();
 
     match lang {
-        Language::Rust => dep_names.iter().any(|d| {
-            ["axum", "actix-web", "warp", "rocket", "poem", "tide"].contains(&d.as_str())
-        }),
+        Language::Rust => dep_names
+            .iter()
+            .any(|d| ["axum", "actix-web", "warp", "rocket", "poem", "tide"].contains(&d.as_str())),
         Language::Node => dep_names.iter().any(|d| {
-            ["express", "fastify", "koa", "hapi", "nestjs", "next", "nuxt"]
-                .iter()
-                .any(|s| d.contains(s))
+            [
+                "express", "fastify", "koa", "hapi", "nestjs", "next", "nuxt",
+            ]
+            .iter()
+            .any(|s| d.contains(s))
         }),
         Language::Python => dep_names.iter().any(|d| {
-            ["flask", "django", "fastapi", "starlette", "tornado", "uvicorn"]
-                .iter()
-                .any(|s| d.contains(s))
+            [
+                "flask",
+                "django",
+                "fastapi",
+                "starlette",
+                "tornado",
+                "uvicorn",
+            ]
+            .iter()
+            .any(|s| d.contains(s))
         }),
-        Language::Go => dep_names.iter().any(|d| d.contains("gin") || d.contains("echo") || d.contains("chi")),
-        Language::Java => dep_names.iter().any(|d| d.contains("spring") || d.contains("quarkus") || d.contains("micronaut")),
+        Language::Go => dep_names
+            .iter()
+            .any(|d| d.contains("gin") || d.contains("echo") || d.contains("chi")),
+        Language::Java => dep_names
+            .iter()
+            .any(|d| d.contains("spring") || d.contains("quarkus") || d.contains("micronaut")),
         // Libraries in these languages are less common as containerised services.
         Language::Ruby => true, // Rails apps are almost always services
         _ => false,
@@ -565,15 +586,15 @@ fn looks_like_service(lang: &Language, deps: &DependencyReport) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusty_venture_core::context::ExecutionContext;
-    use rusty_venture_llm::{
-        LlmConnector,
-        types::{ContentBlock, LlmError, LlmRequest, LlmResponse, Usage},
-    };
     use rusty_venture_actions::repo::{
-        CTX_DEPENDENCY_REPORT, CTX_DETECTED_LANGUAGES, CTX_REPO_URL,
         analyze_deps::{Dependency, DependencyKind, DependencyReport},
         detect_language::{DetectedLanguages, Language},
+        CTX_DEPENDENCY_REPORT, CTX_DETECTED_LANGUAGES, CTX_REPO_URL,
+    };
+    use rusty_venture_core::context::ExecutionContext;
+    use rusty_venture_llm::{
+        types::{ContentBlock, LlmError, LlmRequest, LlmResponse, Usage},
+        LlmConnector,
     };
     use std::sync::{Arc, Mutex};
 
@@ -592,9 +613,14 @@ mod tests {
             Ok(LlmResponse {
                 id: "mock".to_string(),
                 model: "mock-model".to_string(),
-                content: vec![ContentBlock::Text { text: self.response.to_string() }],
+                content: vec![ContentBlock::Text {
+                    text: self.response.to_string(),
+                }],
                 stop_reason: "end_turn".to_string(),
-                usage: Usage { input_tokens: 1, output_tokens: 1 },
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
             })
         }
 
@@ -627,13 +653,17 @@ mod tests {
     impl MockBuildRunner {
         /// Always returns `Ok(())` (empty queue → `unwrap_or(Ok(()))`).
         fn always_ok() -> Arc<Self> {
-            Arc::new(Self { outcomes: Mutex::new(vec![]) })
+            Arc::new(Self {
+                outcomes: Mutex::new(vec![]),
+            })
         }
 
         /// Returns outcomes in the order provided; running out reverts to `Ok(())`.
         fn with_outcomes(mut v: Vec<Result<(), String>>) -> Arc<Self> {
             v.reverse(); // pop() takes from the end → preserves original order
-            Arc::new(Self { outcomes: Mutex::new(v) })
+            Arc::new(Self {
+                outcomes: Mutex::new(v),
+            })
         }
     }
 
@@ -661,7 +691,8 @@ mod tests {
 
     async fn ctx_with_url() -> ExecutionContext {
         let ctx = ExecutionContext::new("test");
-        ctx.insert(CTX_REPO_URL, "https://example.com/repo.git".to_string()).await;
+        ctx.insert(CTX_REPO_URL, "https://example.com/repo.git".to_string())
+            .await;
         ctx
     }
 
@@ -670,7 +701,10 @@ mod tests {
     #[tokio::test]
     async fn dockerfile_content_comes_from_llm() {
         let action = make_action(FAKE_DF, vec![]);
-        let result = action.execute(&ctx_with_url().await, ()).await.expect("should succeed");
+        let result = action
+            .execute(&ctx_with_url().await, ())
+            .await
+            .expect("should succeed");
         assert_eq!(result.dockerfile_content, FAKE_DF);
     }
 
@@ -753,7 +787,11 @@ mod tests {
         let ctx = ctx_with_url().await;
         ctx.insert(
             CTX_DETECTED_LANGUAGES,
-            DetectedLanguages { primary: Language::Node, secondary: vec![], scores: vec![] },
+            DetectedLanguages {
+                primary: Language::Node,
+                secondary: vec![],
+                scores: vec![],
+            },
         )
         .await;
         ctx.insert(
@@ -781,7 +819,11 @@ mod tests {
         let ctx = ctx_with_url().await;
         ctx.insert(
             CTX_DETECTED_LANGUAGES,
-            DetectedLanguages { primary: Language::Rust, secondary: vec![], scores: vec![] },
+            DetectedLanguages {
+                primary: Language::Rust,
+                secondary: vec![],
+                scores: vec![],
+            },
         )
         .await;
         ctx.insert(

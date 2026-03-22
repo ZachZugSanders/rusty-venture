@@ -1,0 +1,70 @@
+name: rusty-venture
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      # Copy your key into a .env file alongside this file:
+      #   ANTHROPIC_API_KEY=sk-ant-...
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=sqlite:///data/rusty-venture.db
+      - LISTEN_ADDR=0.0.0.0:3002
+      - RUST_LOG=info
+    volumes:
+      # SQLite database exported to host filesystem.
+      # The file lives at G:\agents\mock-s3-bucket\rusty-venture.db and can be
+      # pushed to S3 directly from there (aws s3 cp / boto3 / etc.).
+      - type: bind
+        source: ${DB_EXPORT_PATH}
+        target: /data
+      # Allow the backend to spin up Docker containers for repo analysis
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── Pre-built analysis runner images ─────────────────────────────────────────
+  # Not running services — built so the local Docker daemon has them cached before
+  # any analysis job runs. The backend spawns these via bollard at analysis time.
+  # Add language-specific runners here (runner-node, runner-python, etc.) as the
+  # project grows; DetectLanguageAction selects the right image at runtime.
+  runner-clone:
+    build:
+      context: .
+      dockerfile: runners/Dockerfile.clone
+    image: rusty-venture-runner-clone:latest
+    profiles: [runners]
+
+  runner-analysis:
+    build:
+      context: .
+      dockerfile: runners/Dockerfile.analysis
+    image: rusty-venture-runner-analysis:latest
+    profiles: [runners]
+
+  # Tier 3 active validation runner — has language toolchains and network enabled.
+  runner-execution:
+    build:
+      context: .
+      dockerfile: runners/Dockerfile.execution
+    image: rusty-venture-runner-execution:latest
+    profiles: [runners]
+

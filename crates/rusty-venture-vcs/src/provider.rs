@@ -28,7 +28,10 @@ pub struct RepoRef {
 
 impl RepoRef {
     pub fn new(owner: impl Into<String>, name: impl Into<String>) -> Self {
-        Self { owner: owner.into(), name: name.into() }
+        Self {
+            owner: owner.into(),
+            name: name.into(),
+        }
     }
 
     pub fn full_name(&self) -> String {
@@ -56,7 +59,11 @@ pub struct FileCommit {
 
 impl FileCommit {
     pub fn create(path: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { path: path.into(), content: content.into(), existing_sha: None }
+        Self {
+            path: path.into(),
+            content: content.into(),
+            existing_sha: None,
+        }
     }
 
     pub fn update(

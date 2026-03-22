@@ -7,6 +7,8 @@ export interface RepoSummary {
     latest_maturity_grade: string | null
     latest_composite_maturity: number | null
     latest_risk_score: number | null
+    /** Highest scan tier that has been fully passed for this repo (1, 2, or 3). */
+    max_unlocked_tier: number
 }
 
 export interface DimensionOverview {
@@ -24,6 +26,31 @@ export interface BlockerItem {
     detail: string | null
 }
 
+export interface SignalItem {
+    name: string
+    passed: boolean
+    points: number
+    detail: string | null
+    /** Maturity tier this signal belongs to (1 = Static, 2 = Content, 3 = Active). */
+    tier: number
+}
+
+export interface DimensionSignals {
+    dimension: string
+    score: number
+    weight: number
+    signals: SignalItem[]
+}
+
+export interface LlmReport {
+    summary: string
+    language_insights: string[]
+    dependency_recommendations: string[]
+    dockerfile_findings: string[]
+    security_violations: string[]
+    general_recommendations: string[]
+}
+
 export interface RepoOverview {
     repo_id: string
     repo_url: string
@@ -32,6 +59,12 @@ export interface RepoOverview {
     confidence: number
     dimensions: DimensionOverview[]
     top_blockers: BlockerItem[]
+    signals_by_dimension: DimensionSignals[]
+    llm_report: LlmReport | null
+    /** Tier that was run for the most recent scan (1, 2, or 3). */
+    scan_tier: number
+    /** Highest tier fully passed — controls what tier can be scanned next. */
+    max_unlocked_tier: number
 }
 
 export interface TrendPoint {
@@ -106,6 +139,8 @@ export interface GraphNode {
     has_detail: boolean
     passed: boolean
     highlight: boolean
+    /** Maturity tier this signal belongs to (1/2/3). Always 1 for root/dim nodes. */
+    tier: number
 }
 
 export interface GraphEdge {
@@ -121,3 +156,27 @@ export interface DecisionGraph {
     config: NodeSizeConfig
 }
 
+export interface AnalyzeStarted {
+    run_id: string
+    repo_url: string
+}
+
+export interface RunLogLine {
+    type: 'log'
+    level: 'info' | 'warn' | 'error'
+    step?: string
+    message: string
+}
+
+export interface RunDone {
+    type: 'done'
+    scan_id?: string
+    repo_url: string
+}
+
+export interface RunFailed {
+    type: 'failed'
+    error: string
+}
+
+export type RunStreamEvent = RunLogLine | RunDone | RunFailed

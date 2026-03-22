@@ -18,6 +18,9 @@ pub const CTX_DOCKER_CLIENT: &str = "docker.client";
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
     pub image: String,
+    /// Explicit container name. Visible in `docker ps` and Docker Desktop.
+    /// Convention: `rv-<role>-<short_run_id>` e.g. `rv-clone-a1b2c3d4`.
+    pub container_name: Option<String>,
     /// Memory limit in MB. Default: 512.
     pub memory_limit_mb: u64,
     /// Whether to disable network. Default: false (network enabled for clone phase).
@@ -33,11 +36,19 @@ impl ContainerConfig {
     pub fn new(image: impl Into<String>) -> Self {
         Self {
             image: image.into(),
+            container_name: None,
             memory_limit_mb: 512,
             network_disabled: false,
             working_dir: "/workspace".to_string(),
             binds: vec![],
         }
+    }
+
+    /// Set the container name shown in `docker ps`.
+    /// Convention: `rv-<role>-<short_run_id>` e.g. `rv-clone-a1b2c3d4`.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.container_name = Some(name.into());
+        self
     }
 
     pub fn network_disabled(mut self) -> Self {
@@ -91,23 +102,31 @@ impl Action for SpawnContainerAction {
     async fn execute(&self, ctx: &ExecutionContext, _input: ()) -> Result<ContainerId, CoreError> {
         let docker: Arc<Docker> = ctx.require::<Arc<Docker>>(CTX_DOCKER_CLIENT).await?;
 
-        info!(image = %self.config.image, "Pulling image if not present");
+        // Only pull from a registry if the image is not already present locally.
+        // Locally-built runner images (e.g. rusty-venture-runner-*) are never
+        // pushed to a registry, so attempting to pull them would always 404.
+        let image_present = docker.inspect_image(&self.config.image).await.is_ok();
 
-        // Pull the image (no-op if already local)
-        use bollard::image::CreateImageOptions;
-        use futures::StreamExt;
+        if image_present {
+            info!(image = %self.config.image, "Image already present locally, skipping pull");
+        } else {
+            info!(image = %self.config.image, "Pulling image from registry");
 
-        let mut pull_stream = docker.create_image(
-            Some(CreateImageOptions {
-                from_image: self.config.image.as_str(),
-                ..Default::default()
-            }),
-            None,
-            None,
-        );
+            use bollard::image::CreateImageOptions;
+            use futures::StreamExt;
 
-        while let Some(result) = pull_stream.next().await {
-            result.map_err(|e| CoreError::Docker(e.to_string()))?;
+            let mut pull_stream = docker.create_image(
+                Some(CreateImageOptions {
+                    from_image: self.config.image.as_str(),
+                    ..Default::default()
+                }),
+                None,
+                None,
+            );
+
+            while let Some(result) = pull_stream.next().await {
+                result.map_err(|e| CoreError::Docker(e.to_string()))?;
+            }
         }
 
         info!(image = %self.config.image, "Creating container");
@@ -118,9 +137,18 @@ impl Action for SpawnContainerAction {
             Some(self.config.binds.clone())
         };
 
+        let create_opts = self
+            .config
+            .container_name
+            .as_deref()
+            .map(|n| CreateContainerOptions {
+                name: n,
+                ..Default::default()
+            });
+
         let container = docker
             .create_container(
-                None::<CreateContainerOptions<&str>>,
+                create_opts,
                 Config {
                     image: Some(self.config.image.as_str()),
                     working_dir: Some(self.config.working_dir.as_str()),

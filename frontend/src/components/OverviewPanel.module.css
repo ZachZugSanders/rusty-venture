@@ -136,6 +136,180 @@
     color: var(--text);
 }
 
+/* ── LLM Summary ─────────────────────────────────────────────────────── */
+
+.llmSummary {
+    font-size: 0.85rem;
+    color: var(--text);
+    line-height: 1.6;
+}
+
+/* ── LLM Recommendation lists ──────────────────────────────────────── */
+
+.llmList {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.llmItem {
+    font-size: 0.82rem;
+    color: var(--text);
+    line-height: 1.5;
+    padding-left: 12px;
+    position: relative;
+}
+
+.llmItem::before {
+    content: '›';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.llmListAccent .llmItem::before {
+    color: var(--red);
+    content: '!';
+}
+
+/* ── Signals by dimension ───────────────────────────────────────────── */
+
+.dimCards {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dimCard {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.dimCardHeader {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(255,255,255,0.03);
+    border: none;
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.82rem;
+    text-align: left;
+    transition: background 0.1s;
+}
+
+.dimCardHeader:hover {
+    background: rgba(255,255,255,0.07);
+}
+
+.dimCardName {
+    flex: 1;
+    font-weight: 600;
+}
+
+.dimCardScore {
+    font-weight: 700;
+    color: var(--text);
+    min-width: 28px;
+    text-align: right;
+}
+
+.dimCardCounts {
+    display: flex;
+    gap: 6px;
+    font-size: 0.72rem;
+}
+
+.passedCount {
+    color: var(--green);
+}
+
+.failedCount {
+    color: var(--red);
+}
+
+.dimCardChevron {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+.signalList {
+    list-style: none;
+    padding: 4px 0;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+}
+
+.signalItem {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    font-size: 0.8rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.signalItem:last-child {
+    border-bottom: none;
+}
+
+.signalPassed {
+    opacity: 0.7;
+}
+
+.signalFailed {
+    opacity: 1;
+}
+
+.signalIcon {
+    font-size: 0.7rem;
+    width: 14px;
+    flex-shrink: 0;
+}
+
+.signalPassed .signalIcon {
+    color: var(--green);
+}
+
+.signalFailed .signalIcon {
+    color: var(--red);
+}
+
+.signalName {
+    flex: 1;
+    font-family: monospace;
+    color: var(--text);
+}
+
+.signalPoints {
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.signalPassed .signalPoints {
+    color: var(--green);
+}
+
+.signalFailed .signalPoints {
+    color: var(--red);
+}
+
+.signalDetail {
+    width: 100%;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    padding-left: 20px;
+    line-height: 1.4;
+}
+
+/* ── Loading / empty ────────────────────────────────────────────────── */
+
 .loading {
     padding: 24px;
     color: var(--text-muted);

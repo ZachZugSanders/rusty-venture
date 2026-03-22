@@ -72,7 +72,10 @@ pub struct DependencyDecisionGate<C> {
 
 impl<C: LlmConnector + 'static> DependencyDecisionGate<C> {
     pub fn new(connector: Arc<C>, input_rx: oneshot::Receiver<String>) -> Self {
-        Self { connector, input_rx }
+        Self {
+            connector,
+            input_rx,
+        }
     }
 }
 
@@ -90,13 +93,14 @@ impl<C: LlmConnector + 'static> Action for DependencyDecisionGate<C> {
         ctx: &ExecutionContext,
         _input: (),
     ) -> Result<DependencyDecision, CoreError> {
-        let dependents: DependentRepos = ctx
-            .require::<DependentRepos>(CTX_DEPENDENT_REPOS)
-            .await?;
+        let dependents: DependentRepos = ctx.require::<DependentRepos>(CTX_DEPENDENT_REPOS).await?;
 
         // ── Build the guidance prompt ─────────────────────────────────────
         let presentation = build_presentation(&dependents);
-        info!(dependent_count = dependents.repos.len(), "Waiting for dependency strategy decision");
+        info!(
+            dependent_count = dependents.repos.len(),
+            "Waiting for dependency strategy decision"
+        );
 
         // Store the prompt in context so the CLI/server can display it.
         ctx.insert(CTX_DECISION_PROMPT, presentation.clone()).await;
@@ -198,8 +202,11 @@ async fn infer_decision<C: LlmConnector>(
     dependents: &DependentRepos,
     user_input: &str,
 ) -> Result<DependencyDecision, CoreError> {
-    let repo_names: Vec<String> =
-        dependents.repos.iter().map(|r| r.full_name.clone()).collect();
+    let repo_names: Vec<String> = dependents
+        .repos
+        .iter()
+        .map(|r| r.full_name.clone())
+        .collect();
 
     let prompt = format!(
         r#"A user has been presented with a list of dependent repositories and asked to choose a dependency handling strategy. Infer their intent and return a structured JSON decision.
@@ -242,6 +249,9 @@ Only populate `per_repo` when strategy is "mixed". Return only the JSON — no m
         .map_err(|e| CoreError::other(format!("LLM decision inference failed: {e}")))?;
 
     let raw = response.text_or_empty();
-    serde_json::from_str(raw)
-        .map_err(|e| CoreError::other(format!("Failed to parse dependency decision JSON: {e}\nRaw: {raw}")))
+    serde_json::from_str(raw).map_err(|e| {
+        CoreError::other(format!(
+            "Failed to parse dependency decision JSON: {e}\nRaw: {raw}"
+        ))
+    })
 }

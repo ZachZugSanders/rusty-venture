@@ -7,18 +7,13 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use super::{
-    audit_files::AuditReport,
-    detect_language::Language,
-    find_dockerfiles::DockerfileReport,
-    governance::GovernanceReport,
-    maturity::MaturityScore,
-    report::FinalReport,
-    CTX_AUDIT_REPORT, CTX_DETECTED_LANGUAGES, CTX_DOCKERFILE_REPORT, CTX_FINAL_REPORT,
-    CTX_GOVERNANCE_REPORT,
+    audit_files::AuditReport, detect_language::Language, find_dockerfiles::DockerfileReport,
+    governance::GovernanceReport, maturity::MaturityScore, report::FinalReport, CTX_AUDIT_REPORT,
+    CTX_DETECTED_LANGUAGES, CTX_DOCKERFILE_REPORT, CTX_FINAL_REPORT, CTX_GOVERNANCE_REPORT,
 };
 use crate::repo::analyze_deps::{DependencyReport, CTX_DEPENDENCY_REPORT};
-use crate::repo::maturity::CTX_MATURITY_SCORE;
 use crate::repo::detect_language::DetectedLanguages;
+use crate::repo::maturity::CTX_MATURITY_SCORE;
 
 pub const CTX_SCAFFOLD_SPEC: &str = "scaffold.spec";
 pub const CTX_IMPROVEMENT_INTENT: &str = "scaffold.intent";
@@ -70,11 +65,19 @@ pub enum NodeKind {
 
 impl DirectoryNode {
     pub fn dir(name: impl Into<String>, children: Vec<DirectoryNode>) -> Self {
-        Self { name: name.into(), kind: NodeKind::Dir, children }
+        Self {
+            name: name.into(),
+            kind: NodeKind::Dir,
+            children,
+        }
     }
 
     pub fn file(name: impl Into<String>) -> Self {
-        Self { name: name.into(), kind: NodeKind::File, children: vec![] }
+        Self {
+            name: name.into(),
+            kind: NodeKind::File,
+            children: vec![],
+        }
     }
 }
 
@@ -197,11 +200,7 @@ impl<C: LlmConnector + 'static> Action for GenerateScaffoldSpecAction<C> {
         "generate-scaffold-spec"
     }
 
-    async fn execute(
-        &self,
-        ctx: &ExecutionContext,
-        _input: (),
-    ) -> Result<ScaffoldSpec, CoreError> {
+    async fn execute(&self, ctx: &ExecutionContext, _input: ()) -> Result<ScaffoldSpec, CoreError> {
         // Gather all analysis context.
         let report = ctx.require::<FinalReport>(CTX_FINAL_REPORT).await?;
         let maturity = ctx.require::<MaturityScore>(CTX_MATURITY_SCORE).await?;
@@ -324,6 +323,7 @@ ScaffoldSpec schema:
   ]
 }"#;
 
+#[allow(clippy::too_many_arguments)]
 fn build_prompt(
     report: &FinalReport,
     maturity: &MaturityScore,
@@ -384,7 +384,11 @@ Available action IDs: "containerize", "generate-dal", "generate-api", "add-licen
         has_docker = dockerfiles.has_root_dockerfile,
         has_compose = dockerfiles.has_root_compose,
         has_ci = governance.has_ci_config,
-        license = if governance.has_license { "present" } else { "MISSING (All Rights Reserved)" },
+        license = if governance.has_license {
+            "present"
+        } else {
+            "MISSING (All Rights Reserved)"
+        },
         violations = audit.violations.len(),
         critical = audit.critical_count,
         lock_file = deps.lock_file_present,

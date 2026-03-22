@@ -118,18 +118,18 @@ impl DagEngine {
         //
         // in_degree[A]    = number of A's unmet prerequisites
         // reverse_adj[B]  = nodes that become ready when B finishes
-        let mut in_degree: HashMap<String, usize> = dag
-            .nodes
-            .keys()
-            .map(|k| (k.clone(), 0usize))
-            .collect();
+        let mut in_degree: HashMap<String, usize> =
+            dag.nodes.keys().map(|k| (k.clone(), 0usize)).collect();
 
         let mut reverse_adj: HashMap<String, Vec<String>> = HashMap::new();
 
         for (name, node) in &dag.nodes {
             for dep in &node.depends_on {
                 *in_degree.get_mut(name).unwrap() += 1;
-                reverse_adj.entry(dep.clone()).or_default().push(name.clone());
+                reverse_adj
+                    .entry(dep.clone())
+                    .or_default()
+                    .push(name.clone());
             }
         }
 
@@ -151,8 +151,11 @@ impl DagEngine {
 
         // ── Drive the DAG to completion ────────────────────────────────────
         while let Some(join_result) = join_set.join_next().await {
-            let NodeResult { name, on_failure, outcome } =
-                join_result.map_err(|e| CoreError::other(format!("DAG task panicked: {e}")))?;
+            let NodeResult {
+                name,
+                on_failure,
+                outcome,
+            } = join_result.map_err(|e| CoreError::other(format!("DAG task panicked: {e}")))?;
 
             let node_succeeded = match outcome {
                 Ok(()) => {
@@ -245,7 +248,10 @@ impl DagEngine {
         let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
         for (name, node) in &dag.nodes {
             for dep in &node.depends_on {
-                reverse_adj.entry(dep.as_str()).or_default().push(name.as_str());
+                reverse_adj
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(name.as_str());
             }
         }
 
@@ -322,11 +328,7 @@ mod tests {
         }
     }
 
-    fn counter_node(
-        name: &str,
-        counter: Arc<AtomicUsize>,
-        deps: &[&str],
-    ) -> DagNode {
+    fn counter_node(name: &str, counter: Arc<AtomicUsize>, deps: &[&str]) -> DagNode {
         let step = StepBuilder::<(), ()>::new(name)
             .action(CounterAction {
                 key: name.to_string(),
@@ -359,8 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn dependent_node_runs_after_prerequisite() {
-        let order: Arc<tokio::sync::Mutex<Vec<String>>> =
-            Arc::new(tokio::sync::Mutex::new(vec![]));
+        let order: Arc<tokio::sync::Mutex<Vec<String>>> = Arc::new(tokio::sync::Mutex::new(vec![]));
 
         struct OrderedAction {
             key: String,
@@ -371,7 +372,9 @@ mod tests {
         impl Action for OrderedAction {
             type Input = ();
             type Output = ();
-            fn name(&self) -> &str { &self.key }
+            fn name(&self) -> &str {
+                &self.key
+            }
             async fn execute(&self, ctx: &ExecutionContext, _: ()) -> Result<(), CoreError> {
                 order_push(&self.order, &self.key).await;
                 ctx.insert(self.key.clone(), true).await;
@@ -389,7 +392,10 @@ mod tests {
 
         let make = |name: &str, order: Arc<tokio::sync::Mutex<Vec<String>>>, deps: &[&str]| {
             let step = StepBuilder::<(), ()>::new(name)
-                .action(OrderedAction { key: name.to_string(), order })
+                .action(OrderedAction {
+                    key: name.to_string(),
+                    order,
+                })
                 .build();
             DagNode::new(step).depends_on(deps.iter().map(|s| s.to_string()))
         };
@@ -410,10 +416,16 @@ mod tests {
     #[tokio::test]
     async fn cycle_is_rejected() {
         let step_a = StepBuilder::<(), ()>::new("a")
-            .action(CounterAction { key: "a".into(), counter: Arc::new(AtomicUsize::new(0)) })
+            .action(CounterAction {
+                key: "a".into(),
+                counter: Arc::new(AtomicUsize::new(0)),
+            })
             .build();
         let step_b = StepBuilder::<(), ()>::new("b")
-            .action(CounterAction { key: "b".into(), counter: Arc::new(AtomicUsize::new(0)) })
+            .action(CounterAction {
+                key: "b".into(),
+                counter: Arc::new(AtomicUsize::new(0)),
+            })
             .build();
 
         let dag = DagWorkflowBuilder::new("cycle-test")
@@ -430,7 +442,10 @@ mod tests {
     #[tokio::test]
     async fn unknown_dependency_is_rejected() {
         let step = StepBuilder::<(), ()>::new("a")
-            .action(CounterAction { key: "a".into(), counter: Arc::new(AtomicUsize::new(0)) })
+            .action(CounterAction {
+                key: "a".into(),
+                counter: Arc::new(AtomicUsize::new(0)),
+            })
             .build();
 
         let dag = DagWorkflowBuilder::new("unknown-dep-test")

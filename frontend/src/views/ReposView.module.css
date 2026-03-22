@@ -16,9 +16,56 @@
 }
 
 .paneHeader {
-    padding: 20px 20px 16px;
+    padding: 16px 20px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.analyzeBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: opacity 0.15s;
+}
+
+.analyzeBtn:hover {
+    opacity: 0.88;
+}
+
+.actionsCell {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.actionsBtn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 4px 10px;
+    transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.actionsBtn:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .paneTitle {
