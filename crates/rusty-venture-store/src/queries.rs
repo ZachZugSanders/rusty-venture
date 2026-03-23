@@ -1046,3 +1046,92 @@ pub async fn get_repo_trends(
     points.reverse(); // oldest first
     Ok(points)
 }
+
+// ── Branch queries ────────────────────────────────────────────────────────────
+
+/// Bulk-upsert branches for a repo.
+///
+/// `branches` is a list of `(name, is_default)` pairs from `git ls-remote`.
+/// Existing rows are updated in-place (`last_seen` refreshed); new rows are
+/// inserted.  Branches that have disappeared from the remote are left in the
+/// table — they may be gone but could still be referenced by past scans.
+pub async fn upsert_branches(
+    pool: &Pool,
+    repo_id: &str,
+    branches: &[(String, bool)],
+) -> Result<()> {
+    if branches.is_empty() {
+        return Ok(());
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut tx = pool.begin().await.context("begin transaction")?;
+    for (name, is_default) in branches {
+        sqlx::query(
+            r#"INSERT INTO repo_branches (repo_id, name, is_default, last_seen)
+               VALUES (?1, ?2, ?3, ?4)
+               ON CONFLICT(repo_id, name) DO UPDATE
+                   SET is_default = excluded.is_default,
+                       last_seen  = excluded.last_seen"#,
+        )
+        .bind(repo_id)
+        .bind(name)
+        .bind(*is_default as i64)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .context("upsert branch")?;
+    }
+    tx.commit().await.context("commit branches")?;
+    Ok(())
+}
+
+/// Return all known branches for a repo, ordered default-first then alpha.
+pub async fn list_branches_for_repo(
+    pool: &Pool,
+    repo_id: &str,
+) -> Result<Vec<crate::models::RepoBranchRow>> {
+    let rows = sqlx::query_as::<_, crate::models::RepoBranchRow>(
+        r#"SELECT id, repo_id, name, is_default, last_seen
+           FROM repo_branches
+           WHERE repo_id = ?1
+           ORDER BY is_default DESC, name ASC"#,
+    )
+    .bind(repo_id)
+    .fetch_all(pool)
+    .await
+    .context("list branches")?;
+    Ok(rows)
+}
+
+/// Ensure a repo row exists for `url` and return its `id`.
+///
+/// If the URL is already tracked, returns the existing `id` immediately.
+/// Otherwise inserts a minimal row and returns the new `id`.
+pub async fn ensure_repo(pool: &Pool, url: &str) -> anyhow::Result<String> {
+    // Fast path: already exists.
+    if let Some((id, _)) = crate::queries::get_repo_tier_by_url(pool, url).await? {
+        return Ok(id);
+    }
+
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        r#"INSERT INTO repos (id, url, first_seen)
+           VALUES (?1, ?2, ?3)
+           ON CONFLICT(url) DO NOTHING"#,
+    )
+    .bind(&new_id)
+    .bind(url)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    // Re-fetch — handles the race where another insert won the conflict.
+    let actual: String = sqlx::query_scalar("SELECT id FROM repos WHERE url = ?1")
+        .bind(url)
+        .fetch_one(pool)
+        .await?;
+
+    Ok(actual)
+}

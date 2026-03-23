@@ -233,6 +233,20 @@ pub struct RepoOverview {
     pub max_unlocked_tier: i64,
 }
 
+/// One known branch for a repo (repo_branches table).
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct RepoBranchRow {
+    pub id: i64,
+    /// FK → repos.id
+    pub repo_id: String,
+    /// Branch name, e.g. `"main"` or `"feature/my-work"`.
+    pub name: String,
+    /// Whether this is the repository's default branch.
+    pub is_default: bool,
+    /// ISO-8601 datetime of the last time this branch was seen via `git ls-remote`.
+    pub last_seen: String,
+}
+
 /// One data point in the trend series returned by `GET /repos/:id/trends`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrendPoint {

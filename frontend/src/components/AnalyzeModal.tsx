@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Modal from './Modal'
 import styles from './AnalyzeModal.module.css'
+import type { RepoBranch, RepoSummary } from '../types'
 
 interface Props {
     onClose: () => void
@@ -197,6 +198,100 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
+    // ── Repo search ───────────────────────────────────────────────────────────
+    const [repos, setRepos] = useState<RepoSummary[]>([])
+    const [repoSearchQuery, setRepoSearchQuery] = useState('')
+    const [showRepoDropdown, setShowRepoDropdown] = useState(false)
+    const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null)
+    const repoSearchRef = useRef<HTMLDivElement>(null)
+
+    // ── Branch picker ─────────────────────────────────────────────────────────
+    const [knownBranches, setKnownBranches] = useState<RepoBranch[]>([])
+    const [scanningBranches, setScanningBranches] = useState(false)
+    const [branchScanError, setBranchScanError] = useState<string | null>(null)
+
+    // Fetch repo list on mount.
+    useEffect(() => {
+        fetch('/api/repos')
+            .then(r => r.json())
+            .then(j => { if (j.success) setRepos(j.data) })
+            .catch(() => {/* non-fatal */})
+    }, [])
+
+    // Close repo dropdown on outside click.
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (repoSearchRef.current && !repoSearchRef.current.contains(e.target as Node)) {
+                setShowRepoDropdown(false)
+            }
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [])
+
+    const filteredRepos = repos.filter(r =>
+        r.url.toLowerCase().includes(repoSearchQuery.toLowerCase())
+    )
+
+    const handleSelectRepo = async (repo: RepoSummary) => {
+        setRepoUrl(repo.url)
+        setRepoSearchQuery(repo.url)
+        setSelectedRepoId(repo.id)
+        setShowRepoDropdown(false)
+        setBranch('')
+        setBranchScanError(null)
+
+        // Load known branches.
+        try {
+            const res = await fetch(`/api/repos/${repo.id}/branches`)
+            const j = await res.json()
+            if (j.success) setKnownBranches(j.data)
+        } catch {
+            setKnownBranches([])
+        }
+    }
+
+    const handleScanBranches = async () => {
+        if (!repoUrl) return
+        setScanningBranches(true)
+        setBranchScanError(null)
+        try {
+            const res = await fetch('/api/repos/scan-branches', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ repo_url: repoUrl }),
+            })
+            const j = await res.json()
+            if (j.success) {
+                const branches: RepoBranch[] = j.data.branches ?? []
+                setKnownBranches(branches)
+                setSelectedRepoId(j.data.repo_id)
+                // Auto-select default branch if none chosen.
+                if (!branch) {
+                    const def = branches.find(b => b.is_default)
+                    if (def) setBranch(def.name)
+                }
+            } else {
+                setBranchScanError(j.error ?? 'Branch scan failed')
+            }
+        } catch (e) {
+            setBranchScanError(`Network error: ${String(e)}`)
+        } finally {
+            setScanningBranches(false)
+        }
+    }
+
+    // When the URL is manually typed (not selected), clear repo selection.
+    const handleUrlChange = (v: string) => {
+        setRepoUrl(v)
+        setRepoSearchQuery(v)
+        if (selectedRepoId && repos.find(r => r.id === selectedRepoId)?.url !== v) {
+            setSelectedRepoId(null)
+            setKnownBranches([])
+            setBranch('')
+        }
+    }
+
     const toggleOptional = (id: ActionId) => {
         setEnabledOptionals(prev => {
             const next = new Set(prev)
@@ -218,7 +313,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
         setSubmitting(true)
         setError(null)
         try {
-            const res = await fetch('/analyze', {
+            const res = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -248,36 +343,98 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
         <Modal title="Analyze Repository" onClose={onClose} size="lg">
             <form onSubmit={handleSubmit} className={styles.form}>
 
-                {/* ── Inputs ─────────────────────────────────────────────── */}
-                <div className={styles.inputs}>
-                    <label className={styles.fieldGroup}>
-                        <span className={styles.fieldLabel}>Repository URL</span>
+                {/* ── Repo search ──────────────────────────────────────────── */}
+                <div className={styles.repoSearch} ref={repoSearchRef}>
+                    <span className={styles.fieldLabel}>
+                        Repository <span className={styles.optional}>(search existing or enter new URL)</span>
+                    </span>
+                    <div className={styles.repoSearchRow}>
                         <input
                             type="url"
                             value={repoUrl}
-                            onChange={e => setRepoUrl(e.target.value)}
+                            onChange={e => handleUrlChange(e.target.value)}
+                            onFocus={() => setShowRepoDropdown(true)}
                             placeholder="https://github.com/owner/repo"
                             required
                             className={styles.input}
                             disabled={submitting}
+                            autoComplete="off"
                         />
-                    </label>
-                    <label className={styles.fieldGroup}>
+                        {selectedRepoId && (
+                            <span className={styles.repoSelectedBadge} title="Existing repo selected">✓</span>
+                        )}
+                    </div>
+                    {showRepoDropdown && filteredRepos.length > 0 && (
+                        <div className={styles.repoDropdown}>
+                            {filteredRepos.slice(0, 8).map(repo => (
+                                <button
+                                    key={repo.id}
+                                    type="button"
+                                    className={`${styles.repoDropdownItem} ${repo.id === selectedRepoId ? styles.repoDropdownItemSelected : ''}`}
+                                    onMouseDown={e => { e.preventDefault(); handleSelectRepo(repo) }}
+                                >
+                                    <span className={styles.repoDropdownUrl}>{repo.url}</span>
+                                    <span className={styles.repoDropdownMeta}>
+                                        {repo.latest_maturity_grade ?? '—'}
+                                        {repo.max_unlocked_tier > 1 && ` · T${repo.max_unlocked_tier} unlocked`}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* ── Branch ───────────────────────────────────────────────── */}
+                <div className={styles.branchRow}>
+                    <label className={styles.fieldGroup} style={{ flex: 1 }}>
                         <span className={styles.fieldLabel}>
                             Branch <span className={styles.optional}>(optional)</span>
                         </span>
-                        <input
-                            type="text"
-                            value={branch}
-                            onChange={e => setBranch(e.target.value)}
-                            placeholder="main"
-                            className={styles.input}
-                            disabled={submitting}
-                        />
+                        {knownBranches.length > 0 ? (
+                            <select
+                                value={branch}
+                                onChange={e => setBranch(e.target.value)}
+                                className={styles.input}
+                                disabled={submitting}
+                            >
+                                <option value="">default branch</option>
+                                {knownBranches.map(b => (
+                                    <option key={b.id} value={b.name}>
+                                        {b.name}{b.is_default ? ' (default)' : ''}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <input
+                                type="text"
+                                value={branch}
+                                onChange={e => setBranch(e.target.value)}
+                                placeholder="main"
+                                className={styles.input}
+                                disabled={submitting}
+                            />
+                        )}
                     </label>
+                    <div className={styles.scanBranchesWrap}>
+                        <button
+                            type="button"
+                            className={styles.scanBranchesBtn}
+                            onClick={handleScanBranches}
+                            disabled={!repoUrl || scanningBranches || submitting}
+                            title="Fetch branches from the remote via git ls-remote"
+                        >
+                            {scanningBranches
+                                ? <><span className={styles.spinnerSm} /> Scanning…</>
+                                : '⎇ Scan for Branches'
+                            }
+                        </button>
+                        {branchScanError && (
+                            <span className={styles.branchScanError}>{branchScanError}</span>
+                        )}
+                    </div>
                 </div>
 
-                {/* ── Tier selector ───────────────────────────────────────── */}
+                {/* ── Tier selector ─────────────────────────────────────────── */}
                 <div className={styles.tierSection}>
                     <span className={styles.pipelineSectionLabel}>Analysis Tier</span>
                     <div className={styles.tierTabs}>
@@ -298,7 +455,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
                     </div>
                 </div>
 
-                {/* ── Tier panel ──────────────────────────────────────────── */}
+                {/* ── Tier panel ────────────────────────────────────────────── */}
                 {tier === 1 ? (
                     /* T1: Full pipeline tree */
                     <div className={styles.pipelineSection}>
@@ -408,7 +565,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
                     </div>
                 )}
 
-                {/* ── Footer ─────────────────────────────────────────────── */}
+                {/* ── Footer ──────────────────────────────────────────────── */}
                 <div className={styles.formFooter}>
                     {error && (
                         <div className={styles.errorCard}>

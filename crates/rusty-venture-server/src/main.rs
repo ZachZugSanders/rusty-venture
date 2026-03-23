@@ -15,8 +15,8 @@ use rusty_venture_actions::repo::{
 use rusty_venture_actions::{DecisionGraph, NodeSizeConfig};
 use rusty_venture_store::{
     advance_repo_tier, get_decision_graph_for_scan, get_repo_overview, get_repo_tier_by_url,
-    get_repo_trends, get_repo_url, get_scan, insert_scan, list_repos, list_scans,
-    list_scans_for_repo, open_pool, scan_exists_for_commit, Pool,
+    get_repo_trends, get_repo_url, get_scan, insert_scan, list_branches_for_repo, list_repos,
+    list_scans, list_scans_for_repo, open_pool, scan_exists_for_commit, upsert_branches, Pool,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -130,6 +130,8 @@ fn build_app(state: AppState) -> Router {
         .route("/repos", get(repos_handler))
         .route("/repos/:id/overview", get(repo_overview_handler))
         .route("/repos/:id/trends", get(repo_trends_handler))
+        .route("/repos/:id/branches", get(repo_branches_handler))
+        .route("/repos/scan-branches", post(scan_branches_handler))
         .route(
             "/scans/:id/decision-graph",
             get(scan_decision_graph_handler),
@@ -811,6 +813,172 @@ async fn repo_trends_handler(
                 .into_response()
         }
     }
+}
+
+// ── Branch handlers ───────────────────────────────────────────────────────────
+
+/// `GET /repos/:id/branches`
+///
+/// Returns all known branches for a repo, ordered default-first then alpha.
+/// Branches are populated by `POST /repos/scan-branches`.
+async fn repo_branches_handler(
+    State(state): State<AppState>,
+    Path(repo_id): Path<String>,
+) -> impl IntoResponse {
+    match list_branches_for_repo(&state.db, &repo_id).await {
+        Ok(branches) => Json(ApiResponse {
+            success: true,
+            data: branches,
+        })
+        .into_response(),
+        Err(e) => {
+            warn!(repo_id = %repo_id, error = %e, "Failed to list branches");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiError::new(e.to_string()),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Request body for `POST /repos/scan-branches`.
+#[derive(Debug, Deserialize)]
+struct ScanBranchesRequest {
+    /// The repository URL to scan (https://github.com/owner/repo).
+    repo_url: String,
+}
+
+/// `POST /repos/scan-branches`
+///
+/// Runs `git ls-remote --heads <url>`, stores the result in `repo_branches`,
+/// and returns the full branch list.
+///
+/// - If the repo is not yet tracked, it is upserted first.
+/// - The operation is cheap — it only performs a git handshake (no full clone).
+async fn scan_branches_handler(
+    State(state): State<AppState>,
+    Json(body): Json<ScanBranchesRequest>,
+) -> impl IntoResponse {
+    info!(repo_url = %body.repo_url, "Scanning branches via git ls-remote");
+
+    // Resolve repo_id (upsert if this is the first time we've seen the URL).
+    let repo_id = match get_or_create_repo(&state.db, &body.repo_url).await {
+        Ok(id) => id,
+        Err(e) => {
+            warn!(error = %e, "Failed to upsert repo for branch scan");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ApiError::new(e.to_string()),
+            )
+                .into_response();
+        }
+    };
+
+    // Run git ls-remote.
+    let branches = match fetch_remote_branches(&body.repo_url).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(repo_url = %body.repo_url, error = %e, "git ls-remote failed");
+            return (
+                StatusCode::BAD_GATEWAY,
+                ApiError::new(format!("git ls-remote failed: {e}")),
+            )
+                .into_response();
+        }
+    };
+
+    // Persist to DB.
+    if let Err(e) = upsert_branches(&state.db, &repo_id, &branches).await {
+        warn!(repo_id = %repo_id, error = %e, "Failed to persist branches");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::new(e.to_string()),
+        )
+            .into_response();
+    }
+
+    // Return the stored list.
+    match list_branches_for_repo(&state.db, &repo_id).await {
+        Ok(rows) => Json(ApiResponse {
+            success: true,
+            data: serde_json::json!({
+                "repo_id": repo_id,
+                "branches": rows,
+            }),
+        })
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::new(e.to_string()),
+        )
+            .into_response(),
+    }
+}
+
+/// Ensure a repo row exists for `url` and return its `id`.
+async fn get_or_create_repo(pool: &Pool, url: &str) -> anyhow::Result<String> {
+    use rusty_venture_store::ensure_repo;
+    ensure_repo(pool, url).await
+}
+
+/// Run `git ls-remote --heads <url>` and return `(branch_name, is_default)` pairs.
+///
+/// The default branch is detected as `HEAD` if `git ls-remote --symref` includes it,
+/// otherwise we fall back to "main" or "master" heuristics.
+async fn fetch_remote_branches(url: &str) -> anyhow::Result<Vec<(String, bool)>> {
+    // Use --symref to also capture HEAD → ref mapping.
+    let output = tokio::process::Command::new("git")
+        .args(["ls-remote", "--symref", "--heads", url])
+        .output()
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to spawn git: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("{}", stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Find the default branch from the symref line, e.g.:
+    //   ref: refs/heads/main	HEAD
+    let default_branch = stdout
+        .lines()
+        .find(|l| l.starts_with("ref: refs/heads/"))
+        .and_then(|l| l.split('\t').next())
+        .and_then(|r| r.strip_prefix("ref: refs/heads/"))
+        .map(str::trim)
+        .map(String::from);
+
+    // Parse branch lines:  <sha>\trefs/heads/<name>
+    let mut branches: Vec<(String, bool)> = stdout
+        .lines()
+        .filter(|l| l.contains("\trefs/heads/"))
+        .filter_map(|l| {
+            let name = l.split('\t').nth(1)?.strip_prefix("refs/heads/")?.trim();
+            if name.is_empty() {
+                return None;
+            }
+            let is_def = default_branch
+                .as_deref()
+                .map(|d| d == name)
+                .unwrap_or(false);
+            Some((name.to_string(), is_def))
+        })
+        .collect();
+
+    // Heuristic fallback if symref wasn't available.
+    if branches.iter().all(|(_, d)| !d) {
+        for preferred in ["main", "master"] {
+            if let Some(b) = branches.iter_mut().find(|(n, _)| n == preferred) {
+                b.1 = true;
+                break;
+            }
+        }
+    }
+
+    Ok(branches)
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────

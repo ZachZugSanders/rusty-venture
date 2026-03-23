@@ -156,6 +156,24 @@ export interface DecisionGraph {
     config: NodeSizeConfig
 }
 
+// ── Branches ──────────────────────────────────────────────────────────────────
+
+export interface RepoBranch {
+    id: number
+    repo_id: string
+    /** Branch name, e.g. "main" or "feature/my-work". */
+    name: string
+    /** True if this is the repo's default branch. */
+    is_default: boolean
+    /** ISO-8601 datetime of the last `git ls-remote` scan. */
+    last_seen: string
+}
+
+export interface ScanBranchesResult {
+    repo_id: string
+    branches: RepoBranch[]
+}
+
 export interface AnalyzeStarted {
     run_id: string
     repo_url: string
