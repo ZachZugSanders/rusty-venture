@@ -4,6 +4,7 @@ pub mod audit_files;
 pub mod clone;
 pub mod content_quality;
 pub mod detect_language;
+pub mod detect_llm;
 pub mod find_dockerfiles;
 pub mod governance;
 pub mod maturity;
@@ -24,6 +25,7 @@ pub use detect_language::{
     detect_language_local, DetectLanguageAction, DetectedLanguages, Language,
     CTX_DETECTED_LANGUAGES,
 };
+pub use detect_llm::{detect_llm_config_local, DetectLlmConfigAction, LlmConfig, LlmProvider, CTX_LLM_CONFIG};
 pub use find_dockerfiles::{DockerfileReport, FindDockerfilesAction, CTX_DOCKERFILE_REPORT};
 pub use governance::{
     detect_governance_local, GovernanceCheckAction, GovernanceReport, CTX_GOVERNANCE_REPORT,
@@ -363,6 +365,7 @@ async fn run_repo_analysis_no_container(
 
     // Tier 3 active validation is not supported in no-container mode
     // (running arbitrary test suites on the host would be unsafe).
+    let llm_config = detect_llm_config_local(&repo_path);
     let maturity = compute_maturity(
         &report,
         &deps,
@@ -372,6 +375,7 @@ async fn run_repo_analysis_no_container(
         &governance,
         content_quality.as_ref(),
         None, // no active validation in no-container mode
+        Some(&llm_config),
     );
 
     ctx.emit_log("info", None, "Analysis complete");
@@ -534,6 +538,12 @@ pub async fn run_repo_analysis(request: RepoAnalysisRequest) -> anyhow::Result<R
                     .on_failure(OnFailure::Continue)
                     .build(),
             ))
+            .node(DagNode::new(
+                StepBuilder::<(), _>::new("detect-llm-config")
+                    .action(DetectLlmConfigAction)
+                    .on_failure(OnFailure::Continue)
+                    .build(),
+            ))
             .build();
 
         run_result = DagEngine::run(analysis_dag, &ctx)
@@ -661,6 +671,10 @@ pub async fn run_repo_analysis(request: RepoAnalysisRequest) -> anyhow::Result<R
         .get::<ActiveValidationReport>(CTX_ACTIVE_VALIDATION_REPORT)
         .await;
 
+    let llm_config = ctx
+        .get::<LlmConfig>(CTX_LLM_CONFIG)
+        .await;
+
     let maturity = compute_maturity(
         &report,
         &deps,
@@ -670,6 +684,7 @@ pub async fn run_repo_analysis(request: RepoAnalysisRequest) -> anyhow::Result<R
         &governance,
         content_quality.as_ref(),
         active_validation.as_ref(),
+        llm_config.as_ref(),
     );
 
     tracing::info!(

@@ -14,7 +14,8 @@ pub const CTX_MATURITY_SCORE: &str = "repo.maturity_score";
 use super::{
     active_validation::ActiveValidationReport, analyze_deps::DependencyReport,
     audit_files::AuditReport, content_quality::ContentQualityReport, detect_language::Language,
-    find_dockerfiles::DockerfileReport, governance::GovernanceReport, report::FinalReport,
+    detect_llm::LlmConfig, find_dockerfiles::DockerfileReport, governance::GovernanceReport,
+    report::FinalReport,
 };
 
 // ── Dimension weights (must sum to 1.0) ─────────────────────────────────────
@@ -471,13 +472,14 @@ pub fn compute_maturity(
     gov: &GovernanceReport,
     content: Option<&ContentQualityReport>,
     active: Option<&ActiveValidationReport>,
+    llm_config: Option<&LlmConfig>,
 ) -> MaturityScore {
     let dimensions = vec![
         score_security(audit, gov, content),
         score_dependency_health(deps, dockerfiles, gov, content),
         score_build_and_ci(dockerfiles, gov, content, active),
-        score_code_organization(primary_language, deps, gov, active),
-        score_project_governance(gov, content),
+        score_code_organization(primary_language, deps, gov, active, llm_config),
+        score_project_governance(gov, content, llm_config),
         score_testing_and_quality(gov, content, active),
     ];
 
@@ -814,6 +816,7 @@ fn score_code_organization(
     deps: &DependencyReport,
     gov: &GovernanceReport,
     active: Option<&ActiveValidationReport>,
+    llm_config: Option<&LlmConfig>,
 ) -> DimensionScore {
     // Language-specific version constraint signal
     let has_version_constraint = match primary_language {
@@ -912,6 +915,24 @@ fn score_code_organization(
         }
     }
 
+    // ── Tier 3 LLM signals ───────────────────────────────────────────────────
+    signals.push(MaturitySignal::new_tier(
+        "llm_context_files_present",
+        "AI context files (CLAUDE.md/AGENTS.md) present to guide LLM understanding",
+        llm_config.map(|l| l.has_context_files).unwrap_or(false),
+        15,
+        None,
+        3,
+    ));
+    signals.push(MaturitySignal::new_tier(
+        "llm_context_coverage",
+        "Multiple directory-level AI context files for granular guidance",
+        llm_config.map(|l| l.context_file_count >= 3).unwrap_or(false),
+        10,
+        None,
+        3,
+    ));
+
     DimensionScore::compute(MaturityDimension::CodeOrganization, signals)
 }
 
@@ -919,6 +940,7 @@ fn score_code_organization(
 fn score_project_governance(
     gov: &GovernanceReport,
     content: Option<&ContentQualityReport>,
+    llm_config: Option<&LlmConfig>,
 ) -> DimensionScore {
     let mut signals = vec![
         // LICENSE — CII floss_license + OpenSSF License check
@@ -1038,6 +1060,24 @@ fn score_project_governance(
             ));
         }
     }
+
+    // ── Tier 3 LLM signals ───────────────────────────────────────────────────
+    signals.push(MaturitySignal::new_tier(
+        "llm_config_present",
+        "Project-level LLM configuration file (.llm-config or llm.toml) present",
+        llm_config.map(|l| l.has_project_config).unwrap_or(false),
+        10,
+        None,
+        3,
+    ));
+    signals.push(MaturitySignal::new_tier(
+        "llm_model_specified",
+        "LLM model name specified in project config (enables reproducible AI-assisted workflows)",
+        llm_config.map(|l| l.has_model_specified).unwrap_or(false),
+        10,
+        None,
+        3,
+    ));
 
     DimensionScore::compute(MaturityDimension::ProjectGovernance, signals)
 }

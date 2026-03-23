@@ -57,6 +57,149 @@
     cursor: not-allowed;
 }
 
+/* ── Tier selector ───────────────────────────────────────────────────────── */
+
+.tierSection {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tierTabs {
+    display: flex;
+    gap: 8px;
+}
+
+.tierTab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    color: var(--text-muted);
+}
+
+.tierTab:hover:not(:disabled) {
+    border-color: var(--tier-color, var(--accent));
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text);
+}
+
+.tierTabActive {
+    border-color: var(--tier-color, var(--accent));
+    background: color-mix(in srgb, var(--tier-color, var(--accent)) 8%, transparent);
+    color: var(--text);
+}
+
+.tierTab:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tierTabBadge {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.tierTabLabel {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--tier-color, var(--accent));
+}
+
+.tierTabName {
+    font-size: 0.72rem;
+    color: inherit;
+    white-space: nowrap;
+}
+
+/* ── Tier info panel (T2/T3) ─────────────────────────────────────────────── */
+
+.tierPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.tierNote {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+    line-height: 1.5;
+}
+
+.tierNoteIcon {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+}
+
+.tierDesc {
+    font-size: 0.875rem;
+    color: var(--text);
+    line-height: 1.6;
+    margin: 0;
+}
+
+.tierChecksLabel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tierChecksIncludes {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.tierCheckList {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tierCheckItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 0.845rem;
+    color: var(--text);
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    line-height: 1.4;
+}
+
+.tierCheckIcon {
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.tierCheckText {
+    flex: 1;
+}
+
 /* ── Pipeline section ────────────────────────────────────────────────────── */
 
 .pipelineSection {

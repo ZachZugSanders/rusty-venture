@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# pre-commit — CLAUDE.md staleness check
+#
+# Detects which directories have staged changes, finds any that are missing
+# or potentially stale CLAUDE.md files, and writes required_claude_changes.md
+# in a format optimised for dropping directly into a Claude Code session.
+#
+# Install (one-time, per clone):
+#   git config core.hooksPath scripts/hooks
+#
+# The hook is non-blocking by default: it writes the file and warns, but does
+# NOT abort the commit. Set RV_CLAUDE_BLOCK=1 to make it blocking.
+
+set -euo pipefail
+
+OUTPUT_FILE="required_claude_changes.md"
+BLOCK="${RV_CLAUDE_BLOCK:-0}"
+
+# ── Collect staged file paths ─────────────────────────────────────────────────
+staged_files=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
+
+if [[ -z "$staged_files" ]]; then
+    exit 0
+fi
+
+# ── Derive unique directories that have staged changes ───────────────────────
+# Walk from the file's directory up to the repo root, collecting every level.
+repo_root=$(git rev-parse --show-toplevel)
+declare -A seen_dirs
+
+while IFS= read -r file; do
+    dir=$(dirname "$file")
+    # Walk up to root, recording every ancestor directory
+    while [[ "$dir" != "." && "$dir" != "/" ]]; do
+        seen_dirs["$dir"]=1
+        dir=$(dirname "$dir")
+    done
+    seen_dirs["."]="${seen_dirs["."]:-0}"
+done <<< "$staged_files"
+
+# ── For each changed directory, check for CLAUDE.md ──────────────────────────
+declare -a missing_claude=()
+declare -a has_claude=()
+
+for dir in "${!seen_dirs[@]}"; do
+    abs_dir="$repo_root/$dir"
+    [[ "$dir" == "." ]] && abs_dir="$repo_root"
+
+    if [[ -f "$abs_dir/CLAUDE.md" ]]; then
+        has_claude+=("$dir")
+    else
+        # Only flag directories that contain at least one staged source file
+        # (ignore pure intermediate path segments with no direct staged files)
+        direct_staged=$(git diff --cached --name-only --diff-filter=ACMR | \
+            awk -F/ -v d="$dir" 'BEGIN{FS="/"} {
+                p=$0; sub(/\/[^\/]*$/, "", p);
+                if (p == d) print $0
+            }')
+        [[ -n "$direct_staged" ]] && missing_claude+=("$dir")
+    fi
+done
+
+# ── Nothing to flag ───────────────────────────────────────────────────────────
+if [[ ${#missing_claude[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+# ── Generate required_claude_changes.md ──────────────────────────────────────
+timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+commit_msg_file=$(git rev-parse --git-dir)/COMMIT_EDITMSG
+branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+
+{
+    cat <<EOF
+# Required CLAUDE.md Updates
+
+**Generated:** $timestamp
+**Branch:** $branch
+**Trigger:** pre-commit hook detected staged changes in directories without CLAUDE.md
+
+---
+
+## Context for Claude
+
+The following directories have staged source changes but no \`CLAUDE.md\` file.
+Please review each section and either create a new \`CLAUDE.md\` or confirm that
+an existing parent-level \`CLAUDE.md\` adequately covers this directory.
+
+To process this file, add it to your Claude Code session context and ask:
+> "Please create or update CLAUDE.md files for each directory listed in required_claude_changes.md"
+
+---
+
+## Directories needing CLAUDE.md
+
+EOF
+
+    for dir in "${missing_claude[@]}"; do
+        abs_dir="$repo_root/$dir"
+        [[ "$dir" == "." ]] && abs_dir="$repo_root"
+
+        echo "### \`$dir/\`"
+        echo ""
+
+        # List the staged files in this directory
+        echo "**Staged files:**"
+        git diff --cached --name-only --diff-filter=ACMR | grep "^${dir}/" | while read -r f; do
+            status=$(git diff --cached --name-status --diff-filter=ACMR "$f" 2>/dev/null | cut -f1)
+            echo "- \`$f\` ($status)"
+        done
+        echo ""
+
+        # Check if a parent directory has a CLAUDE.md that might cover this
+        parent=$(dirname "$dir")
+        parent_covered=""
+        while [[ "$parent" != "." && "$parent" != "/" ]]; do
+            if [[ -f "$repo_root/$parent/CLAUDE.md" ]]; then
+                parent_covered="$parent"
+                break
+            fi
+            parent=$(dirname "$parent")
+        done
+        [[ -f "$repo_root/CLAUDE.md" ]] && parent_covered="${parent_covered:-root}"
+
+        if [[ -n "$parent_covered" ]]; then
+            echo "**Note:** Parent \`$parent_covered/CLAUDE.md\` exists — consider whether it covers this directory or needs updating."
+        else
+            echo "**Note:** No parent CLAUDE.md found. A new file is recommended."
+        fi
+        echo ""
+
+        # Suggest what the CLAUDE.md should contain based on directory name/contents
+        echo "**Suggested content areas:**"
+        # Heuristics based on directory name
+        case "$dir" in
+            */src/repo*) echo "- Action inventory, CTX keys written, container commands used" ;;
+            */src/container*) echo "- Container lifecycle, exec primitive, RAII guard pattern" ;;
+            */src/views*) echo "- Component purpose, props API, CSS module classes, R3F patterns used" ;;
+            */src/components*) echo "- Component purpose, props interface, when to use vs alternatives" ;;
+            crates/*) echo "- Crate purpose, public API surface, what NOT to put here" ;;
+            frontend/*) echo "- Framework/library choices, state management pattern, build setup" ;;
+            runners*) echo "- Image purpose, installed tools, network policy, volume mount mode" ;;
+            *) echo "- Purpose of this directory, key files, design decisions" ;;
+        esac
+        echo ""
+        echo "---"
+        echo ""
+    done
+
+    echo "## Directories with existing CLAUDE.md (may need updates)"
+    echo ""
+    if [[ ${#has_claude[@]} -gt 0 ]]; then
+        for dir in "${has_claude[@]}"; do
+            echo "- \`$dir/\` — review if staged changes alter the documented behaviour"
+        done
+    else
+        echo "_None of the changed directories have existing CLAUDE.md files._"
+    fi
+
+} > "$repo_root/$OUTPUT_FILE"
+
+# ── User-facing output ────────────────────────────────────────────────────────
+echo ""
+echo "┌─────────────────────────────────────────────────────────┐"
+echo "│  CLAUDE.md check: ${#missing_claude[@]} director$([ ${#missing_claude[@]} -eq 1 ] && echo 'y' || echo 'ies') missing context files  │"
+echo "└─────────────────────────────────────────────────────────┘"
+echo ""
+echo "  Missing CLAUDE.md in:"
+for dir in "${missing_claude[@]}"; do
+    echo "    • $dir/"
+done
+echo ""
+echo "  → $OUTPUT_FILE written to repo root."
+echo "    Add it to a Claude Code session and ask:"
+echo "    \"Update CLAUDE.md files per required_claude_changes.md\""
+echo ""
+
+if [[ "$BLOCK" == "1" ]]; then
+    echo "  Commit blocked (RV_CLAUDE_BLOCK=1). Update CLAUDE.md files or unset the var."
+    exit 1
+fi
+
+exit 0

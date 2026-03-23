@@ -1,3 +1,4 @@
+pub mod change;
 pub mod commit;
 pub mod containerize;
 pub mod dependents;
@@ -5,6 +6,10 @@ pub mod gate;
 pub mod governance;
 pub mod workflow;
 
+pub use change::{
+    AppliedChange, ApplyChangesWorkflow, BatchKind, ChangeScheduler, ChangeStatus, ContainerGit,
+    RepairAction, SchedulePlan, CTX_APPLIED_CHANGES,
+};
 pub use commit::{CommittedBranch, CreateBranchAction, CTX_COMMITTED_BRANCHES};
 pub use containerize::{ContainerizeAction, ContainerizeResult, CTX_CONTAINERIZE_RESULT};
 pub use dependents::{DependentRepos, DiscoverDependentsAction, CTX_DEPENDENT_REPOS};

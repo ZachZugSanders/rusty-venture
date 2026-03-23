@@ -2,14 +2,14 @@
  * MaturityGraphView — Phase 5
  *
  * Layout modes:
- *   Solar  — solar system: star (root), orbiting gas giants (dims), moons (signals) [default]
+ *   Solar  — solar system: star (root), orbiting gas giants (dims), ships (signals) [default]
  *   Grid   — score axis (X = 0→100), dimensions in Y/Z plane
  *   Gravity— physics sim with score-based Y forces
  *   Radial — hierarchical radial layout
  *   Force  — physics spring simulation
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Line, Html, Stars } from '@react-three/drei'
 import * as THREE from 'three'
 
@@ -27,8 +27,8 @@ const GRID_RING_RADIUS = 9.0 // radius of Y-Z guide rings
 // Solar system
 const SOLAR_PLANET_BASE = 4.0  // first planet orbit radius
 const SOLAR_PLANET_GAP  = 2.5  // additional radius per planet
-const SOLAR_MOON_BASE   = 1.1  // first moon orbit radius
-const SOLAR_MOON_GAP    = 0.6  // additional moon orbit radius per moon
+const SOLAR_SHIP_BASE   = 1.1  // first ship orbit radius
+const SOLAR_SHIP_GAP    = 0.6  // additional ship orbit radius per ship
 
 // ── Colour palette ────────────────────────────────────────────────────────────
 
@@ -465,9 +465,122 @@ function buildDimEdgeLengths(nodes: GraphNode[], edges: GraphEdge[]): Map<string
     return map
 }
 
+// ── Camera focus ──────────────────────────────────────────────────────────────
+
+interface AnimState {
+    startCam: THREE.Vector3
+    startTarget: THREE.Vector3
+    endCam: THREE.Vector3
+    endTarget: THREE.Vector3
+    progress: number
+}
+
+export interface FocusRequest { id: string; seq: number }
+
+function SolarCameraFocus({ request, solar }: { request: FocusRequest | null; solar: SolarParams }) {
+    const { camera, controls } = useThree()
+    const lastSeqRef = useRef<number | null>(null)
+    const animRef = useRef<AnimState | null>(null)
+
+    useFrame(({ clock }) => {
+        if (!request || !controls) return
+        const ctrl = controls as any
+
+        if (request.seq !== lastSeqRef.current) {
+            lastSeqRef.current = request.seq
+            const t = clock.getElapsedTime()
+            let lookAt = new THREE.Vector3(solar.starX, 0, 0)
+            let camDist = 16
+
+            if (request.id === solar.rootNode.id) {
+                lookAt.set(solar.starX, 0, 0)
+            } else {
+                outer: for (const planet of solar.planets) {
+                    if (planet.node.id === request.id) {
+                        const a = planet.orbitPhase + t * planet.orbitSpeed
+                        lookAt.set(
+                            solar.starX + planet.orbitRadius * Math.cos(a), 0,
+                            planet.orbitRadius * Math.sin(a),
+                        )
+                        camDist = Math.max(4, planet.node.radius * 7)
+                        break
+                    }
+                    for (const ship of planet.ships) {
+                        if (ship.node.id === request.id) {
+                            const pa = planet.orbitPhase + t * planet.orbitSpeed
+                            const sa = ship.orbitPhase + t * ship.orbitSpeed
+                            lookAt.set(
+                                solar.starX + planet.orbitRadius * Math.cos(pa) + ship.orbitRadius * Math.cos(sa),
+                                0,
+                                planet.orbitRadius * Math.sin(pa) + ship.orbitRadius * Math.sin(sa),
+                            )
+                            camDist = Math.max(2.5, ship.node.radius * 5)
+                            break outer
+                        }
+                    }
+                }
+            }
+
+            animRef.current = {
+                startCam: camera.position.clone(),
+                startTarget: ctrl.target.clone(),
+                endTarget: lookAt.clone(),
+                endCam: lookAt.clone().add(new THREE.Vector3(0, camDist * 0.5, camDist * 0.9)),
+                progress: 0,
+            }
+        }
+
+        if (!animRef.current || animRef.current.progress >= 1) return
+        const anim = animRef.current
+        anim.progress = Math.min(1, anim.progress + 0.035)
+        const p = anim.progress * anim.progress * (3 - 2 * anim.progress)
+        camera.position.lerpVectors(anim.startCam, anim.endCam, p)
+        ctrl.target.lerpVectors(anim.startTarget, anim.endTarget, p)
+        ctrl.update()
+    })
+
+    return null
+}
+
+function GenericCameraFocus({ request, nodes }: { request: FocusRequest | null; nodes: GraphNode[] }) {
+    const { camera, controls } = useThree()
+    const lastSeqRef = useRef<number | null>(null)
+    const animRef = useRef<AnimState | null>(null)
+
+    useFrame(() => {
+        if (!request || !controls) return
+        const ctrl = controls as any
+
+        if (request.seq !== lastSeqRef.current) {
+            lastSeqRef.current = request.seq
+            const node = nodes.find(n => n.id === request.id)
+            if (!node) return
+            const lookAt = new THREE.Vector3(node.px, node.py, node.pz)
+            const camDist = node.kind === 'root' ? 14 : node.kind === 'dimension' ? 8 : 4
+            animRef.current = {
+                startCam: camera.position.clone(),
+                startTarget: ctrl.target.clone(),
+                endTarget: lookAt.clone(),
+                endCam: lookAt.clone().add(new THREE.Vector3(0, camDist * 0.5, camDist)),
+                progress: 0,
+            }
+        }
+
+        if (!animRef.current || animRef.current.progress >= 1) return
+        const anim = animRef.current
+        anim.progress = Math.min(1, anim.progress + 0.04)
+        const p = anim.progress * anim.progress * (3 - 2 * anim.progress)
+        camera.position.lerpVectors(anim.startCam, anim.endCam, p)
+        ctrl.target.lerpVectors(anim.startTarget, anim.endTarget, p)
+        ctrl.update()
+    })
+
+    return null
+}
+
 // ── Solar system types ────────────────────────────────────────────────────────
 
-interface SolarMoonParams {
+interface SolarShipParams {
     node: GraphNode
     orbitRadius: number
     orbitSpeed: number
@@ -479,7 +592,7 @@ interface SolarPlanetParams {
     orbitRadius: number
     orbitSpeed: number
     orbitPhase: number
-    moons: SolarMoonParams[]
+    ships: SolarShipParams[]
     dimIndex: number
 }
 
@@ -512,21 +625,21 @@ function buildSolarSystem(nodes: GraphNode[], edges: GraphEdge[], config: NodeSi
         const orbitPhase = (2 * Math.PI * idx) / Math.max(1, dimIds.length)
 
         const sigIds = edges.filter(e => e.from === dimId).map(e => e.to)
-        const moons: SolarMoonParams[] = sigIds.map((sigId, mIdx) => {
+        const ships: SolarShipParams[] = sigIds.map((sigId, sIdx) => {
             const sigRaw = nodeById.get(sigId)!
-            // Moon size: proportional to this signal's share of the dimension's total max_points
+            // Ship size: proportional to this signal's share of the dimension's total max_points
             const proportion = raw.max_points > 0 ? sigRaw.max_points / raw.max_points : 1 / Math.max(1, sigIds.length)
             const sigNode: GraphNode = {
                 ...sigRaw,
                 radius: 0.08 + proportion * 0.38,
             }
-            const moonRadius = SOLAR_MOON_BASE + mIdx * SOLAR_MOON_GAP
-            const moonSpeed = 0.75 / Math.pow(moonRadius / SOLAR_MOON_BASE, 1.5)
-            const moonPhase = (2 * Math.PI * mIdx) / Math.max(1, sigIds.length)
-            return { node: sigNode, orbitRadius: moonRadius, orbitSpeed: moonSpeed, orbitPhase: moonPhase }
+            const shipRadius = SOLAR_SHIP_BASE + sIdx * SOLAR_SHIP_GAP
+            const shipSpeed = 0.75 / Math.pow(shipRadius / SOLAR_SHIP_BASE, 1.5)
+            const shipPhase = (2 * Math.PI * sIdx) / Math.max(1, sigIds.length)
+            return { node: sigNode, orbitRadius: shipRadius, orbitSpeed: shipSpeed, orbitPhase: shipPhase }
         })
 
-        return { node: dimNode, orbitRadius, orbitSpeed, orbitPhase, moons, dimIndex: idx }
+        return { node: dimNode, orbitRadius, orbitSpeed, orbitPhase, ships, dimIndex: idx }
     })
 
     return { rootNode, starX, planets }
@@ -593,60 +706,172 @@ function StarNode({ node, selected, onClick, showLabels }: StarNodeProps) {
     )
 }
 
-// ── OrbitingMoon ──────────────────────────────────────────────────────────────
+// ── OrbitingShip ──────────────────────────────────────────────────────────────
+// Passed signals → Alliance Scout (sleek blue/cyan fighter, green engine glow)
+// Failed signals → Imperial Raider (wide red wedge, orange engine bank)
 
-interface OrbitingMoonProps {
-    moon: SolarMoonParams
+interface OrbitingShipProps {
+    ship: SolarShipParams
     selected: boolean
     onSelect: () => void
     showLabels: boolean
 }
 
-function OrbitingMoon({ moon, selected, onSelect, showLabels }: OrbitingMoonProps) {
+function OrbitingShip({ ship, selected, onSelect, showLabels }: OrbitingShipProps) {
     const groupRef = useRef<THREE.Group>(null!)
-    const meshRef = useRef<THREE.Mesh>(null!)
+    const shipRef  = useRef<THREE.Group>(null!)
+    const isEnemy  = ship.node.highlight || !ship.node.passed
+    const s        = ship.node.radius   // size scalar ~0.08–0.46
+
     const initialPos: [number, number, number] = [
-        moon.orbitRadius * Math.cos(moon.orbitPhase), 0, moon.orbitRadius * Math.sin(moon.orbitPhase),
+        ship.orbitRadius * Math.cos(ship.orbitPhase), 0, ship.orbitRadius * Math.sin(ship.orbitPhase),
     ]
 
     useFrame(({ clock }) => {
         const t = clock.getElapsedTime()
-        if (groupRef.current) {
-            const a = moon.orbitPhase + t * moon.orbitSpeed
-            groupRef.current.position.set(moon.orbitRadius * Math.cos(a), 0, moon.orbitRadius * Math.sin(a))
-        }
-        if (meshRef.current) meshRef.current.rotation.y += 0.006
+        if (!groupRef.current) return
+        const a = ship.orbitPhase + t * ship.orbitSpeed
+        // Outer group: orbital position
+        groupRef.current.position.set(ship.orbitRadius * Math.cos(a), 0, ship.orbitRadius * Math.sin(a))
+        if (!shipRef.current) return
+        // Inner group: face direction of travel (tangent = (-sin a, 0, cos a))
+        // After rotation.y = -a, local +Z maps to world (-sin a, 0, cos a) ✓
+        shipRef.current.rotation.y = -a
+        // Gentle banking roll
+        shipRef.current.rotation.z = isEnemy
+            ? 0.14 * Math.sin(t * 1.6 + ship.orbitPhase)
+            : 0.09 * Math.sin(t * 1.1 + ship.orbitPhase)
     })
 
-    const texture = (moon.node.highlight || !moon.node.passed) ? PLANET_TEX.signal_fail : PLANET_TEX.signal_pass
-    const atmosColor = moon.node.highlight || !moon.node.passed ? '#ef4444' : '#22c55e'
+    // Colour palettes
+    const hullColor    = isEnemy ? '#5c0a0a' : '#0f2744'
+    const accentColor  = isEnemy ? '#ef4444' : '#38bdf8'
+    const wingColor    = isEnemy ? '#7f1d1d' : '#1d4ed8'
+    const engineColor  = isEnemy ? '#f97316' : '#4ade80'
+    const engineEmit   = isEnemy ? '#ff4500' : '#00ff88'
+    const selectGlow   = isEnemy ? '#fca5a5' : '#7dd3fc'
+    const labelColor   = isEnemy ? '#fca5a5' : '#a5f3fc'
 
     return (
         <group ref={groupRef} position={initialPos}>
-            <mesh>
-                <sphereGeometry args={[moon.node.radius * 1.2, 20, 20]} />
-                <meshStandardMaterial color={atmosColor} transparent opacity={0.10} side={THREE.BackSide} depthWrite={false} />
-            </mesh>
-            <mesh ref={meshRef} onClick={(e) => { e.stopPropagation(); onSelect() }}>
-                <sphereGeometry args={[moon.node.radius, 22, 22]} />
-                <meshStandardMaterial
-                    map={texture}
-                    emissive={selected ? '#60a5fa' : '#000000'}
-                    emissiveIntensity={selected ? 0.5 : 0}
-                    roughness={0.85}
-                    metalness={0.05}
-                />
-            </mesh>
-            {showLabels && (
-                <Html center distanceFactor={8} position={[0, moon.node.radius * 1.4 + 0.08, 0]} style={{ pointerEvents: 'none' }}>
-                    <span style={{
-                        fontSize: '8px', color: '#f8fafc',
-                        textShadow: '0 1px 3px #000', whiteSpace: 'nowrap', userSelect: 'none',
-                    }}>
-                        {moon.node.label.length > 16 ? moon.node.label.slice(0, 14) + '…' : moon.node.label}
-                    </span>
-                </Html>
-            )}
+            <group ref={shipRef}>
+                {/* Invisible bounding sphere — generous click target */}
+                <mesh onClick={(e) => { e.stopPropagation(); onSelect() }}>
+                    <sphereGeometry args={[s * 1.8, 6, 6]} />
+                    <meshStandardMaterial transparent opacity={0} depthWrite={false} />
+                </mesh>
+
+                {isEnemy ? (
+                    /* ── Imperial Raider ───────────────────────────────────────────────
+                       Wide flat wedge hull, delta wings, triple engine bank.
+                       Designed to look aggressive and blocky.                          */
+                    <>
+                        {/* Main hull – hexagonal cross-section, wide and flat */}
+                        <mesh rotation={[Math.PI / 2, 0, 0]}>
+                            <cylinderGeometry args={[s * 0.18, s * 0.52, s * 1.5, 6]} />
+                            <meshStandardMaterial color={hullColor} metalness={0.85} roughness={0.25}
+                                emissive={selected ? selectGlow : '#000'} emissiveIntensity={selected ? 0.45 : 0} />
+                        </mesh>
+                        {/* Dorsal spine ridge */}
+                        <mesh position={[0, s * 0.11, s * 0.05]}>
+                            <boxGeometry args={[s * 0.10, s * 0.18, s * 1.1]} />
+                            <meshStandardMaterial color={accentColor} metalness={0.9} roughness={0.1} />
+                        </mesh>
+                        {/* Left delta wing */}
+                        <mesh position={[-s * 0.58, 0, s * 0.08]} rotation={[0, -0.18, 0]}>
+                            <boxGeometry args={[s * 0.95, s * 0.055, s * 0.75]} />
+                            <meshStandardMaterial color={wingColor} metalness={0.8} roughness={0.2} />
+                        </mesh>
+                        {/* Right delta wing */}
+                        <mesh position={[s * 0.58, 0, s * 0.08]} rotation={[0, 0.18, 0]}>
+                            <boxGeometry args={[s * 0.95, s * 0.055, s * 0.75]} />
+                            <meshStandardMaterial color={wingColor} metalness={0.8} roughness={0.2} />
+                        </mesh>
+                        {/* Nose spike */}
+                        <mesh position={[0, 0, s * 0.88]} rotation={[Math.PI / 2, 0, 0]}>
+                            <coneGeometry args={[s * 0.14, s * 0.5, 6]} />
+                            <meshStandardMaterial color={accentColor} metalness={0.95} roughness={0.05} />
+                        </mesh>
+                        {/* Triple engine bank */}
+                        {([-s * 0.22, 0, s * 0.22] as number[]).map((ox, i) => (
+                            <group key={i} position={[ox, 0, -s * 0.82]}>
+                                <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                                    <coneGeometry args={[s * 0.085, s * 0.24, 8]} />
+                                    <meshStandardMaterial color={engineColor} emissive={engineEmit}
+                                        emissiveIntensity={selected ? 3.5 : 2.2} />
+                                </mesh>
+                                <pointLight color={engineColor} intensity={selected ? 1.0 : 0.5} distance={s * 7} />
+                            </group>
+                        ))}
+                    </>
+                ) : (
+                    /* ── Alliance Scout ────────────────────────────────────────────────
+                       Sleek elongated fuselage, swept wings, twin engine nacelles.
+                       Designed to look fast, purposeful, hopeful.                      */
+                    <>
+                        {/* Main fuselage – tapered cylinder */}
+                        <mesh rotation={[Math.PI / 2, 0, 0]}>
+                            <cylinderGeometry args={[s * 0.11, s * 0.19, s * 2.1, 8]} />
+                            <meshStandardMaterial color={hullColor} metalness={0.75} roughness={0.22}
+                                emissive={selected ? selectGlow : '#000'} emissiveIntensity={selected ? 0.45 : 0} />
+                        </mesh>
+                        {/* Nose cone */}
+                        <mesh position={[0, 0, s * 1.15]} rotation={[Math.PI / 2, 0, 0]}>
+                            <coneGeometry args={[s * 0.11, s * 0.52, 8]} />
+                            <meshStandardMaterial color={accentColor} metalness={0.92} roughness={0.08} />
+                        </mesh>
+                        {/* Left swept wing */}
+                        <mesh position={[-s * 0.44, 0, s * 0.02]} rotation={[0, 0.28, 0]}>
+                            <boxGeometry args={[s * 0.80, s * 0.048, s * 0.48]} />
+                            <meshStandardMaterial color={wingColor} metalness={0.82} roughness={0.18} />
+                        </mesh>
+                        {/* Right swept wing */}
+                        <mesh position={[s * 0.44, 0, s * 0.02]} rotation={[0, -0.28, 0]}>
+                            <boxGeometry args={[s * 0.80, s * 0.048, s * 0.48]} />
+                            <meshStandardMaterial color={wingColor} metalness={0.82} roughness={0.18} />
+                        </mesh>
+                        {/* Left engine nacelle */}
+                        <mesh position={[-s * 0.36, 0, -s * 0.32]} rotation={[Math.PI / 2, 0, 0]}>
+                            <cylinderGeometry args={[s * 0.075, s * 0.075, s * 0.72, 8]} />
+                            <meshStandardMaterial color={accentColor} metalness={0.88} roughness={0.12} />
+                        </mesh>
+                        {/* Right engine nacelle */}
+                        <mesh position={[s * 0.36, 0, -s * 0.32]} rotation={[Math.PI / 2, 0, 0]}>
+                            <cylinderGeometry args={[s * 0.075, s * 0.075, s * 0.72, 8]} />
+                            <meshStandardMaterial color={accentColor} metalness={0.88} roughness={0.12} />
+                        </mesh>
+                        {/* Left engine exhaust */}
+                        <group position={[-s * 0.36, 0, -s * 0.70]}>
+                            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                                <coneGeometry args={[s * 0.075, s * 0.22, 8]} />
+                                <meshStandardMaterial color={engineColor} emissive={engineEmit}
+                                    emissiveIntensity={selected ? 3.5 : 2.2} />
+                            </mesh>
+                            <pointLight color={engineColor} intensity={selected ? 0.7 : 0.32} distance={s * 6} />
+                        </group>
+                        {/* Right engine exhaust */}
+                        <group position={[s * 0.36, 0, -s * 0.70]}>
+                            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                                <coneGeometry args={[s * 0.075, s * 0.22, 8]} />
+                                <meshStandardMaterial color={engineColor} emissive={engineEmit}
+                                    emissiveIntensity={selected ? 3.5 : 2.2} />
+                            </mesh>
+                            <pointLight color={engineColor} intensity={selected ? 0.7 : 0.32} distance={s * 6} />
+                        </group>
+                    </>
+                )}
+
+                {showLabels && (
+                    <Html center distanceFactor={8} position={[0, s * 1.8 + 0.08, 0]} style={{ pointerEvents: 'none' }}>
+                        <span style={{
+                            fontSize: '8px', color: labelColor,
+                            textShadow: '0 1px 3px #000', whiteSpace: 'nowrap', userSelect: 'none',
+                        }}>
+                            {ship.node.label.length > 16 ? ship.node.label.slice(0, 14) + '…' : ship.node.label}
+                        </span>
+                    </Html>
+                )}
+            </group>
         </group>
     )
 }
@@ -669,15 +894,15 @@ function OrbitingPlanet({ planet, starX, selected, onSelect, showLabels }: Orbit
         planet.orbitRadius * Math.sin(planet.orbitPhase),
     ]
 
-    const moonRings = useMemo(
-        () => planet.moons.map(m => {
+    const shipRings = useMemo(
+        () => planet.ships.map(s => {
             const N = 64
             return Array.from({ length: N + 1 }, (_, i) => {
                 const a = (2 * Math.PI * i) / N
-                return [m.orbitRadius * Math.cos(a), 0, m.orbitRadius * Math.sin(a)] as [number, number, number]
+                return [s.orbitRadius * Math.cos(a), 0, s.orbitRadius * Math.sin(a)] as [number, number, number]
             })
         }),
-        [planet.moons]
+        [planet.ships]
     )
 
     useFrame(({ clock }) => {
@@ -693,19 +918,28 @@ function OrbitingPlanet({ planet, starX, selected, onSelect, showLabels }: Orbit
 
     const texture = GAS_GIANT_TEXTURES[planet.dimIndex % GAS_GIANT_TEXTURES.length]
     const isSelected = selected === planet.node.id
+    const isPassed = planet.node.passed && !planet.node.highlight
+    const statusColor = isPassed ? '#22c55e' : '#ef4444'
 
     return (
         <group ref={groupRef} position={initialPos}>
+            {/* Status atmosphere — green ring if passing, red if failing */}
             <mesh>
-                <sphereGeometry args={[planet.node.radius * 1.18, 30, 30]} />
-                <meshStandardMaterial color="#0ea5e9" transparent opacity={0.12} side={THREE.BackSide} depthWrite={false} />
+                <sphereGeometry args={[planet.node.radius * 1.28, 30, 30]} />
+                <meshStandardMaterial
+                    color={statusColor}
+                    transparent
+                    opacity={isPassed ? 0.10 : 0.22}
+                    side={THREE.BackSide}
+                    depthWrite={false}
+                />
             </mesh>
             <mesh ref={meshRef} onClick={(e) => { e.stopPropagation(); onSelect(planet.node.id) }}>
                 <sphereGeometry args={[planet.node.radius, 32, 32]} />
                 <meshStandardMaterial
                     map={texture}
-                    emissive={isSelected ? '#60a5fa' : '#000000'}
-                    emissiveIntensity={isSelected ? 0.4 : 0}
+                    emissive={isSelected ? '#60a5fa' : statusColor}
+                    emissiveIntensity={isSelected ? 0.4 : isPassed ? 0.05 : 0.18}
                     roughness={0.55}
                     metalness={0.05}
                 />
@@ -720,15 +954,15 @@ function OrbitingPlanet({ planet, starX, selected, onSelect, showLabels }: Orbit
                     </span>
                 </Html>
             )}
-            {moonRings.map((pts, i) => (
+            {shipRings.map((pts, i) => (
                 <Line key={i} points={pts} color="#1e293b" lineWidth={0.4} />
             ))}
-            {planet.moons.map(moon => (
-                <OrbitingMoon
-                    key={moon.node.id}
-                    moon={moon}
-                    selected={selected === moon.node.id}
-                    onSelect={() => onSelect(moon.node.id)}
+            {planet.ships.map(ship => (
+                <OrbitingShip
+                    key={ship.node.id}
+                    ship={ship}
+                    selected={selected === ship.node.id}
+                    onSelect={() => onSelect(ship.node.id)}
                     showLabels={showLabels}
                 />
             ))}
@@ -744,9 +978,10 @@ interface SolarSceneProps {
     selected: string | null
     onSelectNode: (id: string) => void
     showLabels: boolean
+    focusRequest?: FocusRequest | null
 }
 
-function SolarScene({ graph, config, selected, onSelectNode, showLabels }: SolarSceneProps) {
+function SolarScene({ graph, config, selected, onSelectNode, showLabels, focusRequest }: SolarSceneProps) {
     const solar = useMemo(() => buildSolarSystem(graph.nodes, graph.edges, config), [graph, config])
 
     const planetRings = useMemo(
@@ -785,6 +1020,7 @@ function SolarScene({ graph, config, selected, onSelectNode, showLabels }: Solar
                 />
             ))}
             <OrbitControls makeDefault target={[solar.starX, 0, 0]} />
+            <SolarCameraFocus request={focusRequest ?? null} solar={solar} />
         </>
     )
 }
@@ -801,9 +1037,10 @@ interface SceneProps {
     ghostNodes: GraphNode[]
     showLabels: boolean
     showGrid: boolean
+    focusRequest?: FocusRequest | null
 }
 
-function Scene({ graph, visibleKinds, highlightOnly, selected, onSelectNode, deltaMap, ghostNodes, showLabels, showGrid }: SceneProps) {
+function Scene({ graph, visibleKinds, highlightOnly, selected, onSelectNode, deltaMap, ghostNodes, showLabels, showGrid, focusRequest }: SceneProps) {
     const nodeMap = useMemo(() => {
         const m = new Map<string, GraphNode>()
         graph.nodes.forEach(n => m.set(n.id, n))
@@ -832,6 +1069,7 @@ function Scene({ graph, visibleKinds, highlightOnly, selected, onSelectNode, del
             <directionalLight position={[15, 20, 10]} intensity={1.6} color="#fff8f0" />
             <pointLight position={[-12, -8, -12]} intensity={0.5} color="#3b82f6" />
             <OrbitControls makeDefault />
+            <GenericCameraFocus request={focusRequest ?? null} nodes={graph.nodes} />
             {showGrid && <ScoreAxis />}
             {visibleEdges.map((edge, i) => {
                 const fromNode = nodeMap.get(edge.from)
@@ -944,6 +1182,7 @@ export default function MaturityGraphView() {
     const [highlightOnly, setHighlightOnly] = useState(false)
     const [tierFilter, setTierFilter] = useState(0)
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+    const [cameraFocusRequest, setCameraFocusRequest] = useState<FocusRequest | null>(null)
     const [layoutConfig, setLayoutConfig] = useState<NodeSizeConfig>(() => {
         try {
             const saved = localStorage.getItem(LOCALSTORAGE_KEY)
@@ -1223,7 +1462,10 @@ export default function MaturityGraphView() {
                         <li key={node.id}
                             className={`${styles.nodeListItem} ${selectedNodeId === node.id ? styles.nodeListItemActive : ''} ${node.highlight ? styles.nodeListItemHighlight : ''}`}
                             data-testid="node-list-item" data-node-id={node.id}
-                            onClick={() => setSelectedNodeId(node.id)}>
+                            onClick={() => {
+                                setSelectedNodeId(node.id)
+                                setCameraFocusRequest(prev => ({ id: node.id, seq: (prev?.seq ?? 0) + 1 }))
+                            }}>
                             <span className={styles.nodeKindDot} style={{ background: node.highlight ? HIGHLIGHT_COLOUR : KIND_COLOUR[node.kind] }} />
                             <span className={styles.nodeListLabel}>{node.label}</span>
                         </li>
@@ -1248,6 +1490,7 @@ export default function MaturityGraphView() {
                                 selected={selectedNodeId}
                                 onSelectNode={id => setSelectedNodeId(id === selectedNodeId ? null : id)}
                                 showLabels={showLabels}
+                                focusRequest={cameraFocusRequest}
                             />
                         )}
                         {layoutMode !== 'solar' && displayGraph && (
@@ -1261,6 +1504,7 @@ export default function MaturityGraphView() {
                                 ghostNodes={ghostNodes}
                                 showLabels={showLabels}
                                 showGrid={layoutMode === 'grid' || layoutMode === 'gravity'}
+                                focusRequest={cameraFocusRequest}
                             />
                         )}
                     </Canvas>
