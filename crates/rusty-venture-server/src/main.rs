@@ -760,11 +760,17 @@ async fn repos_handler(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct OverviewQuery {
+    scan_id: Option<String>,
+}
+
 async fn repo_overview_handler(
     State(state): State<AppState>,
     Path(repo_id): Path<String>,
+    Query(params): Query<OverviewQuery>,
 ) -> impl IntoResponse {
-    match get_repo_overview(&state.db, &repo_id).await {
+    match get_repo_overview(&state.db, &repo_id, params.scan_id.as_deref()).await {
         Ok(Some(overview)) => (
             StatusCode::OK,
             Json(ApiResponse {

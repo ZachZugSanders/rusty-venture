@@ -38,6 +38,7 @@ interface ActiveRun {
 export default function ReposView() {
     const [repos, setRepos] = useState<RepoSummary[]>([])
     const [selected, setSelected] = useState<RepoSummary | null>(null)
+    const [selectedScanId, setSelectedScanId] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [analyzeOpen, setAnalyzeOpen] = useState(false)
     const [actionsRepo, setActionsRepo] = useState<RepoSummary | null>(null)
@@ -138,7 +139,7 @@ export default function ReposView() {
                                     <tr
                                         key={repo.id}
                                         className={`${styles.row} ${selected?.id === repo.id && !activeRun ? styles.rowSelected : ''}`}
-                                        onClick={() => { if (!activeRun) setSelected(repo) }}
+                                        onClick={() => { if (!activeRun) { setSelected(repo); setSelectedScanId(null) } }}
                                         data-testid="repo-row"
                                     >
                                         <td className={styles.urlCell} title={repo.url}>
@@ -190,7 +191,7 @@ export default function ReposView() {
                         onError={handleRunError}
                     />
                 ) : selected ? (
-                    <OverviewPanel repoId={selected.id} />
+                    <OverviewPanel repoId={selected.id} scanId={selectedScanId} />
                 ) : (
                     <div className={styles.detailPlaceholder}>
                         <svg viewBox="0 0 16 16" fill="currentColor" width="24" height="24" style={{ opacity: 0.3 }}>
@@ -215,6 +216,11 @@ export default function ReposView() {
                     onStarted={(runId, repoUrl) => {
                         setActionsRepo(null)
                         handleStarted(runId, repoUrl)
+                    }}
+                    onSelectScan={(scanId) => {
+                        setSelected(actionsRepo)
+                        setSelectedScanId(scanId)
+                        setActionsRepo(null)
                     }}
                 />
             )}

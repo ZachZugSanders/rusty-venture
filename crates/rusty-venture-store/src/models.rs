@@ -253,6 +253,8 @@ pub struct TrendPoint {
     pub scanned_at: String,
     pub composite: i64,
     pub grade: String,
+    /// Git branch that was scanned, if recorded.
+    pub branch: Option<String>,
     /// Score per dimension at this point in time.
     pub dimensions: std::collections::HashMap<String, i64>,
 }

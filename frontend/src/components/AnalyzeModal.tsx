@@ -212,7 +212,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
 
     // Fetch repo list on mount.
     useEffect(() => {
-        fetch('/api/repos')
+        fetch('/repos')
             .then(r => r.json())
             .then(j => { if (j.success) setRepos(j.data) })
             .catch(() => {/* non-fatal */})
@@ -243,7 +243,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
 
         // Load known branches.
         try {
-            const res = await fetch(`/api/repos/${repo.id}/branches`)
+            const res = await fetch(`/repos/${repo.id}/branches`)
             const j = await res.json()
             if (j.success) setKnownBranches(j.data)
         } catch {
@@ -256,7 +256,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
         setScanningBranches(true)
         setBranchScanError(null)
         try {
-            const res = await fetch('/api/repos/scan-branches', {
+            const res = await fetch('/repos/scan-branches', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ repo_url: repoUrl }),
@@ -313,7 +313,7 @@ export default function AnalyzeModal({ onClose, onStarted }: Props) {
         setSubmitting(true)
         setError(null)
         try {
-            const res = await fetch('/api/analyze', {
+            const res = await fetch('/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

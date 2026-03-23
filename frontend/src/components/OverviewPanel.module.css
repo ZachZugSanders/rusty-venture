@@ -136,6 +136,19 @@
     color: var(--text);
 }
 
+.trendBranch {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: var(--surface-2, rgba(255,255,255,0.06));
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ── LLM Summary ─────────────────────────────────────────────────────── */
 
 .llmSummary {

@@ -8,6 +8,7 @@ interface Props {
     repo: RepoSummary
     onClose: () => void
     onStarted: (runId: string, repoUrl: string) => void
+    onSelectScan: (scanId: string) => void
 }
 
 type RescanStatus = 'idle' | 'checking' | 'upToDate' | 'error'
@@ -18,7 +19,7 @@ const TIER_NAMES: Record<number, string> = {
     3: 'Active Validation',
 }
 
-export default function RepoActionsModal({ repo, onClose, onStarted }: Props) {
+export default function RepoActionsModal({ repo, onClose, onStarted, onSelectScan }: Props) {
     const [scans, setScans] = useState<ScanSummary[]>([])
     const [loading, setLoading] = useState(true)
     const [rescanStatus, setRescanStatus] = useState<RescanStatus>('idle')
@@ -152,9 +153,11 @@ export default function RepoActionsModal({ repo, onClose, onStarted }: Props) {
                         <tr>
                             <th>Grade</th>
                             <th>Score</th>
+                            <th>Branch</th>
                             <th>Risk</th>
                             <th>Duration</th>
                             <th>Scanned At</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -162,10 +165,24 @@ export default function RepoActionsModal({ repo, onClose, onStarted }: Props) {
                             <tr key={scan.id} className={styles.row}>
                                 <td><GradeBadge grade={scan.maturity_grade} /></td>
                                 <td className={styles.scoreCell}>{scan.composite_maturity}</td>
+                                <td className={styles.mutedCell}>
+                                    {scan.branch
+                                        ? <span className={styles.branchBadge}>⎇ {scan.branch}</span>
+                                        : <span className={styles.mutedCell}>—</span>
+                                    }
+                                </td>
                                 <td className={styles.mutedCell}>{scan.risk_score}</td>
                                 <td className={styles.mutedCell}>{(scan.duration_ms / 1000).toFixed(1)}s</td>
                                 <td className={styles.mutedCell}>
                                     {scan.scanned_at.slice(0, 16).replace('T', ' ')}
+                                </td>
+                                <td className={styles.selectCell}>
+                                    <button
+                                        className={styles.selectBtn}
+                                        onClick={() => { onSelectScan(scan.id); onClose() }}
+                                    >
+                                        View
+                                    </button>
                                 </td>
                             </tr>
                         ))}

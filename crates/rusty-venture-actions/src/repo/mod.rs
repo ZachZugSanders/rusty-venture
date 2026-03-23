@@ -113,6 +113,8 @@ pub struct RepoAnalysisResult {
     pub commit_hash: Option<String>,
     /// Which maturity tier was executed for this scan.
     pub scan_tier: u8,
+    /// Git branch that was scanned, if specified.
+    pub branch: Option<String>,
 }
 
 /// Build the two-phase repository analysis workflow using the programmatic DSL.
@@ -386,6 +388,7 @@ async fn run_repo_analysis_no_container(
     Ok(RepoAnalysisResult {
         run_id: ctx.run_id.to_string(),
         repo_url: request.repo_url,
+        branch: request.branch,
         report,
         maturity,
         duration_ms,
@@ -701,6 +704,7 @@ pub async fn run_repo_analysis(request: RepoAnalysisRequest) -> anyhow::Result<R
     Ok(RepoAnalysisResult {
         run_id: ctx.run_id.to_string(),
         repo_url: request.repo_url,
+        branch: request.branch,
         report,
         maturity,
         duration_ms,

@@ -71,6 +71,7 @@ export interface TrendPoint {
     scanned_at: string
     composite: number
     grade: string
+    branch: string | null
     dimensions: Record<string, number>
 }
 
@@ -82,6 +83,7 @@ export interface ScanSummary {
     risk_score: number
     composite_maturity: number
     maturity_grade: string
+    branch: string | null
 }
 
 export interface ApiResponse<T> {

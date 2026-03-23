@@ -43,6 +43,44 @@
     white-space: nowrap;
 }
 
+.branchBadge {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+}
+
+.selectCell {
+    text-align: right;
+    padding-right: 8px !important;
+}
+
+.selectBtn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 4px 10px;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+
+.selectBtn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 /* ── Empty state ───────────────────────────────────────────────────────────── */
 
 .emptyState {

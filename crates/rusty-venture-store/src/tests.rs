@@ -999,7 +999,7 @@ mod overview {
     #[tokio::test]
     async fn get_repo_overview_returns_none_for_unknown_repo() {
         let pool = make_pool().await;
-        let result = get_repo_overview(&pool, "no-such-repo")
+        let result = get_repo_overview(&pool, "no-such-repo", None)
             .await
             .expect("should not error");
         assert!(result.is_none());
@@ -1024,7 +1024,7 @@ mod overview {
         .await
         .unwrap();
 
-        let result = get_repo_overview(&pool, &repo_id).await.unwrap();
+        let result = get_repo_overview(&pool, &repo_id, None).await.unwrap();
         assert!(result.is_none(), "no v2 grade → None overview");
     }
 
@@ -1094,7 +1094,7 @@ mod overview {
             .unwrap();
         }
 
-        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
+        let overview = get_repo_overview(&pool, &repo_id, None).await.unwrap().unwrap();
 
         assert!(
             (overview.confidence - 50.0).abs() < 1.0,
@@ -1141,7 +1141,7 @@ mod overview {
             .await
             .unwrap();
 
-        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
+        let overview = get_repo_overview(&pool, &repo_id, None).await.unwrap().unwrap();
 
         assert_eq!(overview.top_blockers.len(), 2, "two failed signals");
         assert_eq!(
@@ -1173,7 +1173,7 @@ mod overview {
             .await
             .unwrap();
 
-        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
+        let overview = get_repo_overview(&pool, &repo_id, None).await.unwrap().unwrap();
 
         assert_eq!(overview.dimensions.len(), 1);
         let dim = &overview.dimensions[0];
@@ -1196,7 +1196,7 @@ mod overview {
             .await
             .unwrap();
 
-        let overview = get_repo_overview(&pool, &repo_id).await.unwrap().unwrap();
+        let overview = get_repo_overview(&pool, &repo_id, None).await.unwrap().unwrap();
         assert_eq!(
             overview.grade, "DIAMOND",
             "must use the latest scan's grade"

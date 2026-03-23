@@ -59,8 +59,8 @@ pub async fn insert_scan(
     sqlx::query(
         r#"INSERT INTO scans
                (id, repo_id, scanned_at, duration_ms, risk_score,
-                composite_maturity, maturity_grade, raw_report, raw_maturity, commit_hash, scan_tier)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
+                composite_maturity, maturity_grade, raw_report, raw_maturity, commit_hash, scan_tier, branch)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"#,
     )
     .bind(scan_id)
     .bind(&actual_repo_id)
@@ -73,6 +73,7 @@ pub async fn insert_scan(
     .bind(&raw_maturity)
     .bind(&result.commit_hash)
     .bind(scan_tier as i64)
+    .bind(&result.branch)
     .execute(&mut *tx)
     .await
     .context("insert scan")?;
@@ -215,6 +216,7 @@ pub struct ScanSummary {
     pub risk_score: u8,
     pub composite_maturity: u8,
     pub maturity_grade: String,
+    pub branch: Option<String>,
 }
 
 /// Return the URL of a repo by its ID, or `None` if not found.
@@ -247,7 +249,7 @@ pub async fn scan_exists_for_commit(
 pub async fn list_scans(pool: &Pool, limit: i64) -> Result<Vec<ScanSummary>> {
     let rows = sqlx::query(
         r#"SELECT s.id, r.url, s.scanned_at, s.duration_ms,
-                  s.risk_score, s.composite_maturity, s.maturity_grade
+                  s.risk_score, s.composite_maturity, s.maturity_grade, s.branch
            FROM scans s
            JOIN repos r ON r.id = s.repo_id
            ORDER BY s.scanned_at DESC
@@ -268,6 +270,7 @@ pub async fn list_scans(pool: &Pool, limit: i64) -> Result<Vec<ScanSummary>> {
             risk_score: r.get::<i64, _>("risk_score") as u8,
             composite_maturity: r.get::<i64, _>("composite_maturity") as u8,
             maturity_grade: r.get::<String, _>("maturity_grade"),
+            branch: r.get::<Option<String>, _>("branch"),
         })
         .collect())
 }
@@ -628,7 +631,7 @@ pub async fn list_scans_for_repo(
 ) -> Result<Vec<ScanSummary>> {
     let rows = sqlx::query(
         r#"SELECT s.id, r.url, s.scanned_at, s.duration_ms,
-                  s.risk_score, s.composite_maturity, s.maturity_grade
+                  s.risk_score, s.composite_maturity, s.maturity_grade, s.branch
            FROM scans s
            JOIN repos r ON r.id = s.repo_id
            WHERE r.url = ?1
@@ -651,6 +654,7 @@ pub async fn list_scans_for_repo(
             risk_score: r.get::<i64, _>("risk_score") as u8,
             composite_maturity: r.get::<i64, _>("composite_maturity") as u8,
             maturity_grade: r.get::<String, _>("maturity_grade"),
+            branch: r.get::<Option<String>, _>("branch"),
         })
         .collect())
 }
@@ -715,26 +719,46 @@ pub async fn list_repos(pool: &Pool, limit: i64) -> Result<Vec<crate::models::Re
 
 /// Return a full overview for the given repo, or `None` if the repo has no v2
 /// grade yet (or the repo ID does not exist).
+///
+/// If `scan_id` is `Some`, return the overview for that specific scan instead
+/// of the most recent one.
 pub async fn get_repo_overview(
     pool: &Pool,
     repo_id: &str,
+    scan_id: Option<&str>,
 ) -> Result<Option<crate::models::RepoOverview>> {
-    // 1. Find the latest scan that has a v2 grade (also pull raw_report for LLM narrative,
-    //    scan_tier for which tier was run, and max_unlocked_tier from the repos row).
-    let grade_row = sqlx::query(
-        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, r.url AS repo_url,
-                  s.raw_report, s.scan_tier, r.max_unlocked_tier
-           FROM scan_grades sg
-           JOIN scans s  ON s.id  = sg.scan_id
-           JOIN repos  r ON r.id  = s.repo_id
-           WHERE r.id = ?1
-           ORDER BY s.scanned_at DESC
-           LIMIT 1"#,
-    )
-    .bind(repo_id)
-    .fetch_optional(pool)
-    .await
-    .context("get_repo_overview: fetch latest grade")?;
+    // 1. Find the target scan that has a v2 grade.
+    let grade_row = if let Some(sid) = scan_id {
+        sqlx::query(
+            r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, r.url AS repo_url,
+                      s.raw_report, s.scan_tier, r.max_unlocked_tier
+               FROM scan_grades sg
+               JOIN scans s  ON s.id  = sg.scan_id
+               JOIN repos  r ON r.id  = s.repo_id
+               WHERE r.id = ?1 AND s.id = ?2
+               LIMIT 1"#,
+        )
+        .bind(repo_id)
+        .bind(sid)
+        .fetch_optional(pool)
+        .await
+        .context("get_repo_overview: fetch scan grade")?
+    } else {
+        sqlx::query(
+            r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, r.url AS repo_url,
+                      s.raw_report, s.scan_tier, r.max_unlocked_tier
+               FROM scan_grades sg
+               JOIN scans s  ON s.id  = sg.scan_id
+               JOIN repos  r ON r.id  = s.repo_id
+               WHERE r.id = ?1
+               ORDER BY s.scanned_at DESC
+               LIMIT 1"#,
+        )
+        .bind(repo_id)
+        .fetch_optional(pool)
+        .await
+        .context("get_repo_overview: fetch latest grade")?
+    };
 
     let Some(grade_row) = grade_row else {
         return Ok(None);
@@ -988,7 +1012,7 @@ pub async fn get_repo_trends(
 ) -> Result<Vec<crate::models::TrendPoint>> {
     // Fetch the N most-recent grades with their scan timestamps.
     let grade_rows = sqlx::query(
-        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, s.scanned_at
+        r#"SELECT sg.id AS grade_id, sg.composite, sg.grade, s.scanned_at, s.branch
            FROM scan_grades sg
            JOIN scans s ON s.id = sg.scan_id
            JOIN repos  r ON r.id = s.repo_id
@@ -1038,6 +1062,7 @@ pub async fn get_repo_trends(
                 scanned_at: r.get("scanned_at"),
                 composite: r.get("composite"),
                 grade: r.get("grade"),
+                branch: r.get("branch"),
                 dimensions: dims,
             }
         })

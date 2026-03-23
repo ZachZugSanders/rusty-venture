@@ -5,6 +5,7 @@ import styles from './OverviewPanel.module.css'
 
 interface OverviewPanelProps {
     repoId: string
+    scanId?: string | null
 }
 
 function LlmSection({ title, items, accent }: { title: string; items: string[]; accent?: boolean }) {
@@ -112,7 +113,7 @@ function TierTrack({ scanTier, maxUnlockedTier }: { scanTier: number; maxUnlocke
     )
 }
 
-export default function OverviewPanel({ repoId }: OverviewPanelProps) {
+export default function OverviewPanel({ repoId, scanId }: OverviewPanelProps) {
     const [overview, setOverview] = useState<RepoOverview | null>(null)
     const [trends, setTrends] = useState<TrendPoint[]>([])
     const [loading, setLoading] = useState(true)
@@ -122,8 +123,12 @@ export default function OverviewPanel({ repoId }: OverviewPanelProps) {
         setLoading(true)
         setError(null)
 
+        const overviewUrl = scanId
+            ? `/repos/${repoId}/overview?scan_id=${scanId}`
+            : `/repos/${repoId}/overview`
+
         Promise.all([
-            fetch(`/repos/${repoId}/overview`).then(r => r.json()),
+            fetch(overviewUrl).then(r => r.json()),
             fetch(`/repos/${repoId}/trends?window=10`).then(r => r.json()),
         ])
             .then(([ovRes, trRes]) => {
@@ -133,7 +138,7 @@ export default function OverviewPanel({ repoId }: OverviewPanelProps) {
             })
             .catch(e => setError(String(e)))
             .finally(() => setLoading(false))
-    }, [repoId])
+    }, [repoId, scanId])
 
     if (loading) return <div className={styles.loading}>Loading overview…</div>
     if (error || !overview) return <div className={styles.empty}>{error ?? 'No overview available'}</div>
@@ -251,6 +256,11 @@ export default function OverviewPanel({ repoId }: OverviewPanelProps) {
                                 <span className={styles.trendDate}>{pt.scanned_at.slice(0, 10)}</span>
                                 <GradeBadge grade={pt.grade} />
                                 <span className={styles.trendComposite}>{pt.composite}</span>
+                                {pt.branch && (
+                                    <span className={styles.trendBranch} title={pt.branch}>
+                                        ⎇ {pt.branch}
+                                    </span>
+                                )}
                             </li>
                         ))}
                     </ul>

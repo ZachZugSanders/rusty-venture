@@ -62,7 +62,7 @@ RUN cargo build --release -p rusty-venture-server
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 wget \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 wget git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/rusty-venture-server /usr/local/bin/rusty-venture-server
