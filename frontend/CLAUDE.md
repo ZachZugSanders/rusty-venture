@@ -29,10 +29,10 @@ The maturity graph is visualised as a solar system:
 - `RepoSummary`, `ScanResult` — API response shapes
 
 ## API base URL
-`/api` proxied to the backend by Vite dev server (see `vite.config.ts`). In production, nginx routes `/api/` to the backend container.
+No `/api/` prefix — nginx proxies these paths directly to the backend: `/repos`, `/scans`, `/analyze`, `/runs`, `/health`. All `fetch()` calls use these paths without a prefix. Never add `/api/` — nginx has no such location block.
 
 ## State management
-No global store. Each view fetches its own data via `fetch('/api/...')` in `useEffect`. The `RunProgressPanel` component streams SSE from `/api/analyze` using `EventSource`.
+No global store. Each view fetches its own data via `fetch('/repos/...')` etc. in `useEffect`. `RunProgressPanel` streams SSE from `/runs/:id/stream` using `EventSource`.
 
 ## Adding a new view
 1. Create `src/views/MyView.tsx` + `MyView.module.css`

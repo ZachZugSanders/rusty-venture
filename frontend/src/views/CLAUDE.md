@@ -6,7 +6,8 @@ Full-page view components. Each view corresponds to one tab in `App.tsx`. Views 
 ## View inventory
 
 ### `ReposView` / `ReposView.module.css`
-Repository list page. Fetches `GET /api/repos`, displays scan status, and opens `AnalyzeModal` to start a new run. Opens `RepoActionsModal` for per-repo actions.
+
+Repository list + detail page. State: `selected: RepoSummary | null`, `selectedScanId: string | null`, `activeRun`. Clicking a repo row sets `selected` and clears `selectedScanId` (shows latest scan). Clicking "View" in `RepoActionsModal` sets both `selected` and `selectedScanId` — `OverviewPanel` receives both and fetches that specific scan via `?scan_id=`. Opens `AnalyzeModal` to start a new run; run progress replaces the detail panel via `RunProgressPanel`.
 
 ### `MaturityGraphView` / `MaturityGraphView.tsx`
 Interactive 3D solar system visualisation of a maturity scan result. The heaviest view — see below.
